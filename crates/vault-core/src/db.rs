@@ -1,23 +1,27 @@
 use crate::crypto::{decrypt, derive_key, encrypt, DerivedKey, VaultMetaFile};
 use crate::error::{Result, VaultError};
 use crate::paths;
-use rusqlite::Connection;
+use rusqlite::serialize::OwnedData;
+use rusqlite::{Connection, DatabaseName};
 use std::fs;
+use std::os::raw::c_int;
 use std::path::{Path, PathBuf};
+use std::ptr::NonNull;
+use zeroize::Zeroize;
 
-/// An unlocked vault: a live SQLite connection to a plaintext working copy on
-/// disk, backed by an AES-256-GCM encrypted blob that is the only artifact
-/// meant to persist across app restarts.
+/// An unlocked vault: a live **in-memory** SQLite database, backed by an
+/// AES-256-GCM encrypted blob on disk that is the only artifact meant to
+/// persist across app restarts.
 ///
-/// The working copy (`session_db_path`) is deleted on [`Vault::lock`] / clean
-/// process exit and is always overwritten fresh from the encrypted blob on
-/// the next open, so a leftover file from an abnormal crash is never
-/// trusted — it is simply discarded.
+/// The decrypted database exists solely in this process's memory. Nothing is
+/// ever written to disk in plaintext: [`persist`](Vault::persist) serializes
+/// the in-memory image and encrypts it before writing, so a stolen disk (or a
+/// crash) never exposes secrets. The connection — and the derived key — are
+/// freed when the `Vault` is dropped or [`locked`](Vault::lock).
 #[derive(Debug)]
 pub struct Vault {
     pub(crate) conn: Connection,
     key: DerivedKey,
-    session_db_path: PathBuf,
     blob_path: PathBuf,
 }
 
@@ -27,16 +31,36 @@ fn meta_file_path(dir: &Path) -> PathBuf {
 fn blob_file_path(dir: &Path) -> PathBuf {
     dir.join("vault.db.enc")
 }
-fn session_file_path(dir: &Path) -> PathBuf {
-    dir.join("vault.session.db")
+
+/// Earlier builds decrypted the vault into this plaintext working file. It is
+/// no longer created, but a stale one from a prior version would still contain
+/// every secret in the clear — delete it whenever we touch the vault.
+fn remove_legacy_session_file(dir: &Path) {
+    let _ = fs::remove_file(dir.join("vault.session.db"));
+}
+
+/// Copies `bytes` into a buffer allocated by `sqlite3_malloc` and wraps it as
+/// an [`OwnedData`], which is what `sqlite3_deserialize` requires — it takes
+/// ownership of the memory and frees/resizes it with SQLite's own allocator,
+/// so a plain Rust `Vec` cannot be handed over directly.
+fn owned_data_from(bytes: &[u8]) -> Result<OwnedData> {
+    let sz = c_int::try_from(bytes.len())
+        .map_err(|_| VaultError::Crypto("vault image too large to load".into()))?;
+    // sqlite3_malloc(0) legitimately returns NULL; a valid DB image is never
+    // empty, so treat a null return as an allocation/corruption failure.
+    let ptr = unsafe { rusqlite::ffi::sqlite3_malloc(sz) } as *mut u8;
+    let nn = NonNull::new(ptr)
+        .ok_or_else(|| VaultError::Crypto("could not allocate vault image".into()))?;
+    unsafe {
+        std::ptr::copy_nonoverlapping(bytes.as_ptr(), nn.as_ptr(), bytes.len());
+        Ok(OwnedData::from_raw_nonnull(nn, bytes.len()))
+    }
 }
 
 fn configure_connection(conn: &Connection) -> Result<()> {
-    // DELETE journal mode (not WAL) keeps the entire database state in the
-    // single working file, since persist() re-encrypts that file wholesale.
-    conn.execute_batch(
-        "PRAGMA journal_mode = DELETE; PRAGMA synchronous = FULL; PRAGMA foreign_keys = ON;",
-    )?;
+    // Enforce FK cascades (repo -> env -> variable deletes). Journaling and
+    // synchronous pragmas are irrelevant for an in-memory database.
+    conn.execute_batch("PRAGMA foreign_keys = ON;")?;
     Ok(())
 }
 
@@ -127,17 +151,15 @@ impl Vault {
         let meta = VaultMetaFile::new_random();
         let key = derive_key(password, &meta)?;
         fs::write(&meta_path, serde_json::to_vec_pretty(&meta)?)?;
+        remove_legacy_session_file(dir);
 
-        let session_db_path = session_file_path(dir);
-        let _ = fs::remove_file(&session_db_path);
-        let conn = Connection::open(&session_db_path)?;
+        let conn = Connection::open_in_memory()?;
         configure_connection(&conn)?;
         migrate(&conn)?;
 
         let vault = Vault {
             conn,
             key,
-            session_db_path,
             blob_path,
         };
         vault.persist()?;
@@ -154,22 +176,12 @@ impl Vault {
         let meta: VaultMetaFile = serde_json::from_slice(&fs::read(&meta_path)?)?;
         let key = derive_key(password, &meta)?;
         let blob = fs::read(&blob_path)?;
-        let plaintext = decrypt(&key, &blob)?;
+        let mut plaintext = decrypt(&key, &blob)?;
+        remove_legacy_session_file(dir);
 
-        let session_db_path = session_file_path(dir);
-        let _ = fs::remove_file(&session_db_path);
-        fs::write(&session_db_path, &plaintext)?;
-
-        let conn = Connection::open(&session_db_path)?;
-        configure_connection(&conn)?;
-        migrate(&conn)?;
-
-        Ok(Vault {
-            conn,
-            key,
-            session_db_path,
-            blob_path,
-        })
+        let vault = Self::from_plaintext(key, blob_path, &plaintext);
+        plaintext.zeroize();
+        vault
     }
 
     pub fn open_with_key_in(dir: &Path, key_hex: &str) -> Result<Self> {
@@ -177,29 +189,36 @@ impl Vault {
         if !blob_path.exists() {
             return Err(VaultError::NotFound(blob_path));
         }
-        let key_bytes = hex::decode(key_hex).map_err(|e| VaultError::Crypto(e.to_string()))?;
+        let mut key_bytes = hex::decode(key_hex).map_err(|e| VaultError::Crypto(e.to_string()))?;
         if key_bytes.len() != 32 {
+            key_bytes.zeroize();
             return Err(VaultError::Crypto("stored key has wrong length".into()));
         }
         let mut arr = [0u8; 32];
         arr.copy_from_slice(&key_bytes);
+        key_bytes.zeroize();
         let key = DerivedKey(arr);
 
         let blob = fs::read(&blob_path)?;
-        let plaintext = decrypt(&key, &blob)?;
+        let mut plaintext = decrypt(&key, &blob)?;
+        remove_legacy_session_file(dir);
 
-        let session_db_path = session_file_path(dir);
-        let _ = fs::remove_file(&session_db_path);
-        fs::write(&session_db_path, &plaintext)?;
+        let vault = Self::from_plaintext(key, blob_path, &plaintext);
+        plaintext.zeroize();
+        vault
+    }
 
-        let conn = Connection::open(&session_db_path)?;
+    /// Builds an unlocked vault by loading a decrypted SQLite image into a
+    /// fresh in-memory database. `plaintext` is never written to disk.
+    fn from_plaintext(key: DerivedKey, blob_path: PathBuf, plaintext: &[u8]) -> Result<Self> {
+        let mut conn = Connection::open_in_memory()?;
+        let data = owned_data_from(plaintext)?;
+        conn.deserialize(DatabaseName::Main, data, false)?;
         configure_connection(&conn)?;
         migrate(&conn)?;
-
         Ok(Vault {
             conn,
             key,
-            session_db_path,
             blob_path,
         })
     }
@@ -210,22 +229,23 @@ impl Vault {
         hex::encode(self.key.0)
     }
 
-    /// Re-encrypts the current working copy and atomically replaces the
-    /// on-disk vault blob. Called after every mutating operation.
+    /// Serializes the in-memory database, encrypts the image, and atomically
+    /// replaces the on-disk vault blob. Called after every mutating operation.
     pub(crate) fn persist(&self) -> Result<()> {
-        let plaintext = fs::read(&self.session_db_path)?;
-        let ciphertext = encrypt(&self.key, &plaintext)?;
+        let image = self.conn.serialize(DatabaseName::Main)?;
+        let ciphertext = encrypt(&self.key, &image)?;
         let tmp_path = self.blob_path.with_extension("enc.tmp");
         fs::write(&tmp_path, &ciphertext)?;
         fs::rename(&tmp_path, &self.blob_path)?;
         Ok(())
     }
 
-    /// Deletes the plaintext working copy. Call on app exit or explicit lock.
+    /// Drops the in-memory database and zeroizes the key. There is no plaintext
+    /// working file to clean up. Kept for API symmetry with lock-on-exit
+    /// callers; a plain drop is equivalent.
     pub fn lock(self) -> Result<()> {
-        let session_db_path = self.session_db_path.clone();
         drop(self.conn);
-        let _ = fs::remove_file(&session_db_path);
+        // `self.key` (DerivedKey) zeroizes itself on drop here.
         Ok(())
     }
 }
