@@ -23,14 +23,10 @@ pub fn meta_path() -> Result<PathBuf> {
 }
 
 /// The single encrypted-at-rest artifact containing the whole SQLite database.
+/// While unlocked, the database lives only in memory; this blob is the sole
+/// plaintext-free representation on disk.
 pub fn db_blob_path() -> Result<PathBuf> {
     Ok(data_dir()?.join("vault.db.enc"))
-}
-
-/// Live plaintext working copy used only while the vault is unlocked in this
-/// process. Deleted on lock/clean exit; overwritten fresh on every unlock.
-pub fn session_db_path() -> Result<PathBuf> {
-    Ok(data_dir()?.join("vault.session.db"))
 }
 
 pub fn vault_exists() -> Result<bool> {
