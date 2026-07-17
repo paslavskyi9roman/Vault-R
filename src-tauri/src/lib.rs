@@ -1,0 +1,46 @@
+mod commands;
+mod state;
+
+use state::AppState;
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
+        .manage(AppState::default())
+        .invoke_handler(tauri::generate_handler![
+            commands::vault_exists,
+            commands::vault_try_keychain,
+            commands::vault_create,
+            commands::vault_unlock,
+            commands::vault_lock,
+            commands::list_repo_summaries,
+            commands::create_repo,
+            commands::create_environment,
+            commands::list_variables_with_usage,
+            commands::add_variable,
+            commands::update_variable_value,
+            commands::delete_variable,
+            commands::link_candidates,
+            commands::link_variables,
+            commands::unlink_variable,
+            commands::group_members,
+            commands::linked_group_count,
+            commands::search,
+            commands::import_env_text,
+            commands::export_env_text,
+            commands::export_env_to_file,
+            commands::list_snapshots,
+            commands::restore_snapshot,
+            commands::list_members,
+            commands::add_member,
+            commands::remove_member,
+            commands::get_meta,
+            commands::set_meta,
+            commands::copy_secret_to_clipboard,
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
+}

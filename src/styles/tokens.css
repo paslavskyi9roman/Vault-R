@@ -1,0 +1,45 @@
+:root {
+  --font-mono: 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
+  --font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+
+  --bg: #101116;
+  --panel: #17181e;
+  --panel-2: #1c1e26;
+  --panel-3: #20222c;
+  --border: #282b35;
+  --border-light: rgba(255, 255, 255, 0.07);
+  --text: #e7e9ee;
+  --text-dim: #9096a3;
+  --text-faint: #5c6270;
+  --accent: #58e6a8;
+  --accent-dim: rgba(88, 230, 168, 0.14);
+  --key: #8ab4f8;
+  --danger: #f0776e;
+  --selection-bg: #2f6f5e;
+  --cli-bg: #0c0d11;
+
+  --env-local: #6ea8fe;
+  --env-staging: #f0b35e;
+  --env-production: #f0776e;
+  --env-custom: #9096a3;
+}
+
+@keyframes vaultFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes vaultSlideIn {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}

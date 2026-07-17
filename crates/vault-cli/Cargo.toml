@@ -1,0 +1,14 @@
+[package]
+name = "vault-cli"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "vault"
+path = "src/main.rs"
+
+[dependencies]
+vault-core = { path = "../vault-core" }
+clap = { version = "4", features = ["derive"] }
+rpassword = "7"
+keyring = "2"

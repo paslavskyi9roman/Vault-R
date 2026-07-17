@@ -1,0 +1,47 @@
+@import './tokens.css';
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  overflow: hidden;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+::selection {
+  background: var(--selection-bg);
+  color: #fff;
+}
+
+input,
+textarea,
+button {
+  font-family: inherit;
+}
+
+button {
+  font: inherit;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--panel-3);
+  border-radius: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+#root {
+  height: 100vh;
+  width: 100%;
+}
