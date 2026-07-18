@@ -2,6 +2,7 @@ import { useVaultStore } from '../store/useVaultStore';
 import { envColor } from '../lib/envColor';
 import { VariablesTable } from './VariablesTable';
 import { LinkedFolders } from './LinkedFolders';
+import styles from './MainPanel.module.css';
 
 export function MainPanel() {
   const repos = useVaultStore((s) => s.repos);
@@ -17,11 +18,11 @@ export function MainPanel() {
 
   if (!activeRepo) {
     return (
-      <div style={mainStyle}>
-        <div style={emptyStateStyle}>
-          <div style={emptyGlyphStyle}>&#10095;_</div>
-          <div style={emptyTitleStyle}>No repositories yet</div>
-          <div style={emptySubStyle}>Add a repository from the sidebar to start storing secrets.</div>
+      <div className={styles.main}>
+        <div className={styles.emptyState}>
+          <div className={styles.emptyGlyph}>&#10095;_</div>
+          <div className={styles.emptyTitle}>No repositories yet</div>
+          <div className={styles.emptySub}>Add a repository from the sidebar to start storing secrets.</div>
         </div>
       </div>
     );
@@ -29,10 +30,12 @@ export function MainPanel() {
 
   if (!activeEnv) {
     return (
-      <div style={mainStyle}>
-        <div style={emptyStateStyle}>
-          <div style={emptyTitleStyle}>{activeRepo.name} has no environments yet</div>
-          <div style={emptySubStyle}>Use the + next to the repo in the sidebar to add one (e.g. "local").</div>
+      <div className={styles.main}>
+        <div className={styles.emptyState}>
+          <div className={styles.emptyTitle}>{activeRepo.name} has no environments yet</div>
+          <div className={styles.emptySub}>
+            Use the + next to the repo in the sidebar to add one (e.g. "local").
+          </div>
         </div>
       </div>
     );
@@ -44,42 +47,49 @@ export function MainPanel() {
   const missingCount = variables.filter((v) => v.required && !v.value.trim()).length;
 
   return (
-    <div style={mainStyle}>
-      <div style={breadcrumbRowStyle}>
-        <div style={breadcrumbTextStyle}>
-          <span style={breadcrumbRepoStyle}>{activeRepo.name}</span>
-          <span style={breadcrumbSlashStyle}>/</span>
-          <span style={{ ...envBadgeStyle, color: envColor(activeEnv.name) }}>{activeEnv.name}</span>
+    <div className={styles.main}>
+      <div className={styles.breadcrumbRow}>
+        <div className={styles.breadcrumbText}>
+          <span className={styles.breadcrumbRepo}>{activeRepo.name}</span>
+          <span className={styles.breadcrumbSlash}>/</span>
+          <span
+            className={styles.envBadge}
+            style={{ ['--env-tone' as string]: envColor(activeEnv.name) }}
+          >
+            {activeEnv.name}
+          </span>
         </div>
-        <div style={varCountTextStyle}>
+        <div className={styles.varCount}>
           {variables.length} variable{variables.length === 1 ? '' : 's'}
           {requiredCount > 0 && (
-            <span style={missingCount > 0 ? requiredCountWarnStyle : requiredCountOkStyle}>
+            <span className={styles.required} data-missing={missingCount > 0}>
               {' · '}
               {missingCount > 0 ? `${missingCount}/${requiredCount} required missing` : `${requiredCount} required`}
             </span>
           )}
         </div>
-        <button style={historyBtnStyle} onClick={openCompare}>
-          Compare
-        </button>
-        <button style={historyBtnStyle} onClick={() => void openHistory()}>
-          History
-        </button>
+        <div className={styles.panelActions}>
+          <button className="v-btn" onClick={openCompare}>
+            Compare
+          </button>
+          <button className="v-btn" onClick={() => void openHistory()}>
+            History
+          </button>
+        </div>
       </div>
 
-      <div style={cliBoxStyle}>
-        <div style={cliLineRowStyle}>
-          <span style={cliPromptStyle}>$</span>
-          <span style={cliTextStyle}>{cliLine1}</span>
-          <button style={cliCopyBtnStyle} onClick={() => void copyVariable(cliLine1, 'command')}>
+      <div className={styles.cliBox}>
+        <div className={styles.cliLineRow}>
+          <span className={styles.cliPrompt}>$</span>
+          <span className={styles.cliText}>{cliLine1}</span>
+          <button className={`v-btn ${styles.cliCopy}`} onClick={() => void copyVariable(cliLine1, 'command')}>
             copy
           </button>
         </div>
-        <div style={cliLineRowStyle}>
-          <span style={cliPromptStyle}>$</span>
-          <span style={cliTextStyle}>{cliLine2}</span>
-          <button style={cliCopyBtnStyle} onClick={() => void copyVariable(cliLine2, 'command')}>
+        <div className={styles.cliLineRow}>
+          <span className={styles.cliPrompt}>$</span>
+          <span className={styles.cliText}>{cliLine2}</span>
+          <button className={`v-btn ${styles.cliCopy}`} onClick={() => void copyVariable(cliLine2, 'command')}>
             copy
           </button>
         </div>
@@ -91,92 +101,3 @@ export function MainPanel() {
     </div>
   );
 }
-
-const mainStyle: React.CSSProperties = { flex: 1, overflowY: 'auto', padding: '26px 34px 60px' };
-
-const emptyStateStyle: React.CSSProperties = {
-  height: '100%',
-  display: 'flex',
-  flexDirection: 'column',
-  alignItems: 'center',
-  justifyContent: 'center',
-  textAlign: 'center',
-  gap: '8px',
-  color: 'var(--text-dim)',
-};
-const emptyGlyphStyle: React.CSSProperties = {
-  fontFamily: 'var(--font-mono)',
-  color: 'var(--accent)',
-  fontWeight: 700,
-  fontSize: '28px',
-};
-const emptyTitleStyle: React.CSSProperties = { fontSize: '15px', fontWeight: 700, color: 'var(--text)' };
-const emptySubStyle: React.CSSProperties = { fontSize: '13px', color: 'var(--text-dim)', maxWidth: '360px' };
-
-const breadcrumbRowStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: '14px',
-  marginBottom: '16px',
-};
-const breadcrumbTextStyle: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: '8px' };
-const breadcrumbRepoStyle: React.CSSProperties = {
-  fontFamily: 'var(--font-mono)',
-  fontSize: '19px',
-  fontWeight: 700,
-  color: 'var(--text)',
-};
-const breadcrumbSlashStyle: React.CSSProperties = { color: 'var(--text-faint)', fontSize: '18px' };
-const envBadgeStyle: React.CSSProperties = {
-  fontFamily: 'var(--font-mono)',
-  fontSize: '12px',
-  fontWeight: 700,
-  background: 'rgba(255,255,255,0.05)',
-  borderRadius: '5px',
-  padding: '3px 9px',
-};
-const varCountTextStyle: React.CSSProperties = { fontSize: '12px', color: 'var(--text-faint)', marginLeft: '2px' };
-const requiredCountOkStyle: React.CSSProperties = { color: 'var(--text-faint)' };
-const requiredCountWarnStyle: React.CSSProperties = { color: 'var(--danger)', fontWeight: 600 };
-const historyBtnStyle: React.CSSProperties = {
-  marginLeft: 'auto',
-  fontSize: '12.5px',
-  fontWeight: 600,
-  color: 'var(--text-dim)',
-  background: 'transparent',
-  border: '1px solid var(--border)',
-  borderRadius: '6px',
-  padding: '7px 12px',
-  cursor: 'pointer',
-};
-
-const cliBoxStyle: React.CSSProperties = {
-  background: 'var(--cli-bg)',
-  border: '1px solid var(--border)',
-  borderRadius: '8px',
-  padding: '12px 14px',
-  marginBottom: '20px',
-  display: 'flex',
-  flexDirection: 'column',
-  gap: '6px',
-};
-const cliLineRowStyle: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: '10px' };
-const cliPromptStyle: React.CSSProperties = { color: 'var(--accent)', fontFamily: 'var(--font-mono)', fontSize: '13px' };
-const cliTextStyle: React.CSSProperties = {
-  color: 'var(--text-dim)',
-  fontFamily: 'var(--font-mono)',
-  fontSize: '13px',
-  flex: 1,
-  overflow: 'hidden',
-  textOverflow: 'ellipsis',
-  whiteSpace: 'nowrap',
-};
-const cliCopyBtnStyle: React.CSSProperties = {
-  fontSize: '11px',
-  color: 'var(--text-faint)',
-  background: 'transparent',
-  border: '1px solid var(--border)',
-  borderRadius: '5px',
-  padding: '3px 8px',
-  cursor: 'pointer',
-};

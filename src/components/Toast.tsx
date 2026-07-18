@@ -1,22 +1,21 @@
 import { useVaultStore } from '../store/useVaultStore';
+import { usePresence, useLastPresent } from '../lib/usePresence';
+import styles from './Toast.module.css';
 
 export function Toast() {
-  const toast = useVaultStore((s) => s.toast);
-  if (!toast) return null;
-  return <div style={toastStyle}>{toast}</div>;
-}
+  const toastLive = useVaultStore((s) => s.toast);
+  const { mounted, state } = usePresence(!!toastLive, 160);
+  // The store nulls the message on a timer, so hold it through the fade or
+  // the toast would empty itself before it finished leaving.
+  const toast = useLastPresent(toastLive);
 
-const toastStyle: React.CSSProperties = {
-  position: 'fixed',
-  bottom: '24px',
-  left: '50%',
-  transform: 'translateX(-50%)',
-  background: 'var(--panel-3)',
-  border: '1px solid var(--border)',
-  color: 'var(--text)',
-  fontSize: '13px',
-  padding: '10px 18px',
-  borderRadius: '8px',
-  zIndex: 60,
-  animation: 'vaultFadeIn 0.2s ease',
-};
+  if (!mounted || !toast) return null;
+
+  const phase = state === 'entered' ? styles.isEntered : state === 'exiting' ? styles.isExiting : '';
+
+  return (
+    <div className={`${styles.toast} ${phase}`} role="status" aria-live="polite">
+      {toast}
+    </div>
+  );
+}

@@ -1,0 +1,336 @@
+.sidebar {
+  width: 260px;
+  flex-shrink: 0;
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  padding: 14px 14px var(--space-3);
+}
+
+.headerText {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  color: var(--text-faint);
+  flex: 1;
+}
+
+.addBtn {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border-radius: 5px;
+  font-size: 13px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.repoList {
+  flex: 1;
+  overflow-y: auto;
+  padding-bottom: 10px;
+}
+
+/* ---- rows ---- */
+
+/* The row is a container, not a control: the label is one button and each
+   action is a sibling button. Nesting buttons would be invalid markup and
+   was the reason these actions used to be unreachable spans. */
+.row {
+  display: flex;
+  align-items: center;
+  position: relative;
+  transition: background-color var(--t-hover);
+}
+
+.row:hover {
+  background: var(--row-hover);
+}
+
+.repoMain {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex: 1;
+  min-width: 0;
+  padding: 9px var(--space-2) 9px 14px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  user-select: none;
+}
+
+.repoMain:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring-inset);
+}
+
+.chevron {
+  color: var(--text-faint);
+  font-size: 10px;
+  width: 10px;
+  flex-shrink: 0;
+  transition: color var(--t-hover);
+}
+
+.row:hover .chevron {
+  color: var(--text-dim);
+}
+
+.repoName {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--text);
+  font-weight: 600;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.countPill {
+  font-size: 10px;
+  color: var(--text-faint);
+  background: var(--panel-2);
+  border-radius: 8px;
+  padding: 1px var(--space-2);
+  flex-shrink: 0;
+}
+
+.envMain {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: 1;
+  min-width: 0;
+  padding: 7px var(--space-2) 7px 28px;
+  background: transparent;
+  border: none;
+  border-left: 2px solid transparent;
+  cursor: pointer;
+  text-align: left;
+  transition:
+    border-color var(--t-hover),
+    background-color var(--t-hover);
+}
+
+.envMain:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring-inset);
+}
+
+.row[data-active='true'] {
+  background: var(--accent-dim);
+}
+
+.row[data-active='true'] .envMain {
+  border-left-color: var(--accent);
+}
+
+.row[data-active='true'] .envName {
+  color: var(--text);
+}
+
+/* --dot carries envColor() so the hover rules can stay in CSS. */
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--dot, var(--env-custom));
+  flex-shrink: 0;
+  transition: transform var(--t-hover);
+}
+
+.row:hover .dot,
+.row[data-active='true'] .dot {
+  transform: scale(1.3);
+}
+
+.envName {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--text-dim);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: color var(--t-hover);
+}
+
+.envCount {
+  font-size: 10.5px;
+  color: var(--text-faint);
+  flex-shrink: 0;
+}
+
+/* ---- row actions ---- */
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-right: 10px;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity var(--t-hover);
+}
+
+.row:hover .actions,
+.row:focus-within .actions {
+  opacity: 1;
+}
+
+/* Touch has no hover, so nothing would ever reveal them. */
+@media (hover: none) {
+  .actions {
+    opacity: 1;
+  }
+}
+
+.action {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    color var(--t-hover),
+    background-color var(--t-hover);
+}
+
+.action:hover {
+  color: var(--text);
+  background: var(--hover-overlay);
+}
+
+.action:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.actionDanger {
+  font-size: 14px;
+}
+
+.actionDanger:hover {
+  color: var(--danger);
+  background: rgba(240, 119, 110, 0.12);
+}
+
+/* ---- inline forms ---- */
+
+.inlineForm {
+  display: flex;
+  gap: 5px;
+  padding: var(--space-1) 14px 10px;
+}
+
+.inlineFormEnv {
+  padding-left: 30px;
+  padding-bottom: var(--space-3);
+}
+
+.duplicateForm {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) 14px var(--space-3) 30px;
+  flex-wrap: wrap;
+}
+
+.duplicateCheckbox {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: 11px;
+  color: var(--text-faint);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.inlineInput {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  border-radius: 5px;
+  padding: 5px var(--space-3);
+}
+
+.inlineConfirm {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent);
+  padding: 0 var(--space-3);
+  border-radius: 5px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.inlineConfirm:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.inlineCancel {
+  font-size: 13px;
+  color: var(--text-faint);
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  padding: 0 var(--space-2);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition:
+    color var(--t-hover),
+    background-color var(--t-hover);
+}
+
+.inlineCancel:hover {
+  color: var(--text);
+  background: var(--hover-overlay);
+}
+
+.inlineCancel:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* ---- footer ---- */
+
+.emptyHint {
+  padding: 10px 14px;
+  font-size: 11.5px;
+  color: var(--text-faint);
+  line-height: 1.5;
+}
+
+.footer {
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+}
+
+.footerLine {
+  font-size: 10.5px;
+  color: var(--text-faint);
+  line-height: 1.5;
+}
