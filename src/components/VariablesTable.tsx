@@ -223,6 +223,7 @@ function VariableRow({ variable }: { variable: VariableWithUsage }) {
       <div className={styles.row} data-selected={selected}>
         <div className={styles.colCheck}>
           <input
+            className="v-check"
             type="checkbox"
             checked={selected}
             onChange={() => toggleVarSelected(variable.id)}
@@ -370,6 +371,7 @@ function VariableDetail({ variable }: { variable: VariableWithUsage }) {
       />
       <label className={styles.detailLabel}>
         <input
+          className="v-check"
           type="checkbox"
           checked={required}
           onChange={(e) => {

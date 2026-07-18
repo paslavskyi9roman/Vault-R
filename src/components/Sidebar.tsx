@@ -150,6 +150,7 @@ export function Sidebar() {
                           />
                           <label className={styles.duplicateCheckbox}>
                             <input
+                              className="v-check"
                               type="checkbox"
                               checked={duplicateCopyValues}
                               onChange={toggleDuplicateCopyValues}

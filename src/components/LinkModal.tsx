@@ -44,6 +44,7 @@ export function LinkModal() {
           {linkCandidates.map((c) => (
             <label key={c.variable.id} className={styles.row}>
               <input
+                className="v-check"
                 type="checkbox"
                 checked={!!linkSelected[c.variable.id]}
                 onChange={() => toggleLinkSelected(c.variable.id)}

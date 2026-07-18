@@ -1,4 +1,5 @@
 import { useVaultStore } from '../store/useVaultStore';
+import { LockIcon, GearIcon } from './icons';
 import styles from './TopBar.module.css';
 
 const isMac = navigator.platform.toLowerCase().includes('mac');
@@ -58,11 +59,17 @@ export function TopBar() {
           className="v-btn v-btn--icon"
           onClick={() => void openSettings()}
           title="Vault settings, backups and recovery"
+          aria-label="Vault settings"
         >
-          &#9881;
+          <GearIcon />
         </button>
-        <button className="v-btn v-btn--icon" onClick={() => void lockVault()} title="Lock vault">
-          &#128274;
+        <button
+          className="v-btn v-btn--icon"
+          onClick={() => void lockVault()}
+          title="Lock vault"
+          aria-label="Lock vault"
+        >
+          <LockIcon />
         </button>
       </div>
     </header>

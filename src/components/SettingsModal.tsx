@@ -217,7 +217,12 @@ function PasswordSection() {
         disabled={needsMigration}
       />
       <label className={styles.checkboxRow}>
-        <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
+        <input
+          className="v-check"
+          type="checkbox"
+          checked={remember}
+          onChange={(e) => setRemember(e.target.checked)}
+        />
         <span>Remember on this device</span>
       </label>
       {pwError && <div className={styles.error}>{pwError}</div>}
