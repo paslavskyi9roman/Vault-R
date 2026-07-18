@@ -1,17 +1,4 @@
-/* ---------------------------------------------------------------------------
-   Lock screen.
-
-   Laid out as two panes: what the app knows (left) and what it needs from you
-   (right). The manifest on the left is deliberate — this screen used to be a
-   bare card that said "create a vault" whenever the lookup came back empty,
-   which reads as "your secrets are gone". It now always shows the directory it
-   read, the format it found, and how many backups exist, so the state of the
-   vault is legible before anyone types a password.
-
-   Type is set in JetBrains Mono for anything that reports a fact and Inter for
-   anything that speaks to the user. Both ship with the app; this is a desktop
-   binary that must render identically offline, so no font is ever fetched.
---------------------------------------------------------------------------- */
+/* Lock screen: what the app knows (left) and what it needs from you (right). */
 
 .auth-root {
   height: 100vh;
@@ -21,8 +8,6 @@
   justify-content: center;
   padding: 32px;
   background: var(--bg);
-  /* A single cool wash off the top-left, so the flat panel has somewhere to
-     sit. Low-contrast enough that it reads as depth, not as a gradient. */
   background-image: radial-gradient(
     900px 520px at 12% -10%,
     rgba(88, 230, 168, 0.05),
@@ -170,8 +155,6 @@
   color: var(--danger);
 }
 
-/* The one orchestrated moment on this screen: the manifest reports itself
-   line by line, the way a status readout would. */
 .auth-row,
 .auth-manifest-head {
   animation: vaultFadeIn 0.34s ease both;
@@ -259,7 +242,6 @@
   padding-right: 42px;
 }
 
-/* Reveal control, so a long master password can be checked before submitting. */
 .auth-reveal {
   position: absolute;
   right: 6px;

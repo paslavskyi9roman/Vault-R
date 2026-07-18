@@ -1725,14 +1725,6 @@ fn scanning_linked_projects_covers_every_linked_folder() {
     assert_eq!(reports.iter().filter(|r| r.has_findings()).count(), 1);
 }
 
-// ---------------------------------------------------------------------
-// Status probe
-//
-// The lock screen decides between "unlock" and "create" from this, and a
-// wrong answer either strands someone with secrets or offers to overwrite
-// them. Each format gets an explicit test.
-// ---------------------------------------------------------------------
-
 #[test]
 fn status_reports_no_vault_for_an_empty_directory() {
     let dir = temp_dir();
@@ -1741,7 +1733,6 @@ fn status_reports_no_vault_for_an_empty_directory() {
     assert!(!status.exists);
     assert_eq!(status.format, None);
     assert_eq!(status.backup_count, 0);
-    // The directory is always reported, so a false negative can be diagnosed.
     assert_eq!(status.dir, dir.path().to_string_lossy());
     assert_eq!(status.file_name, "vault.db.enc");
 }

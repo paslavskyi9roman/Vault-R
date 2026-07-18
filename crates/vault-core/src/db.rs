@@ -112,8 +112,7 @@ fn blob_file_path(dir: &Path) -> PathBuf {
     dir.join("vault.db.enc")
 }
 
-/// Reads at most `head.len()` leading bytes, returning how many were read.
-/// A file shorter than the buffer is not an error — it just is not a v2 vault.
+/// A file shorter than `head` is not an error — it just is not a v2 vault.
 fn read_head(path: &Path, head: &mut [u8]) -> std::io::Result<usize> {
     use std::io::Read;
     let mut file = fs::File::open(path)?;
@@ -127,9 +126,6 @@ fn read_head(path: &Path, head: &mut [u8]) -> std::io::Result<usize> {
     Ok(filled)
 }
 
-/// Number of automatic backups on disk. A missing directory counts as zero
-/// rather than an error, so a vault that has never been backed up still
-/// reports a status.
 fn count_backups(dir: &Path) -> usize {
     fs::read_dir(dir.join("backups"))
         .map(|entries| {
@@ -311,24 +307,18 @@ fn migrate(conn: &Connection) -> Result<bool> {
     apply_migrations(conn, MIGRATIONS, SCHEMA_VERSION)
 }
 
-/// What the app can learn about the vault on disk *without* unlocking it.
-///
-/// This exists so the lock screen can never again claim there is no vault
-/// without also showing the directory it looked in and what it found there —
-/// a silent false negative used to send users straight to "create a vault"
-/// with no way back.
+/// What the app can learn about the vault on disk without unlocking it, so the
+/// lock screen can show the directory it searched rather than only reporting
+/// that it found nothing.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VaultStatus {
-    /// Directory the vault is read from, for display and troubleshooting.
     pub dir: String,
     pub file_name: String,
     pub exists: bool,
-    /// On-disk format: 1 for a legacy vault, 2 for the current one. `None`
-    /// when there is no vault file to inspect.
+    /// 1 for a legacy vault, 2 for the current one, `None` when there is no file.
     pub format: Option<u32>,
     pub bytes: u64,
-    /// Last write, as Unix milliseconds, so the UI can format it locally.
     pub modified_ms: Option<u64>,
     pub backup_count: usize,
 }
@@ -338,12 +328,10 @@ impl Vault {
         paths::vault_exists()
     }
 
-    /// Inspects the vault directory without unlocking anything.
     pub fn status() -> Result<VaultStatus> {
         Self::status_in(&paths::data_dir()?)
     }
 
-    /// Same as [`Vault::status`] but rooted at an arbitrary directory.
     pub fn status_in(dir: &Path) -> Result<VaultStatus> {
         let blob_path = blob_file_path(dir);
         let file_name = blob_path
@@ -371,8 +359,8 @@ impl Vault {
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
             .map(|d| d.as_millis() as u64);
 
-        // Only the first bytes are needed to tell the formats apart, so a
-        // large vault is never read into memory just to render this screen.
+        // Only the leading bytes distinguish the formats, so a large vault is
+        // never read into memory just to render a screen.
         let mut head = [0u8; 8];
         let format = match read_head(&blob_path, &mut head) {
             Ok(read) if read == MAGIC.len() && &head == MAGIC => Some(2),

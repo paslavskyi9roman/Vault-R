@@ -56,12 +56,10 @@ interface VaultState {
   // ---- lifecycle ----
   checkingVault: boolean;
   vaultExists: boolean;
-  /// Set when the startup check itself failed. Distinct from `vaultExists:
-  /// false` — "we could not look" must never be shown as "you have no vault".
+  /// Set when the startup check failed: "could not look" is not "no vault".
   initError: string | null;
   vaultStatus: VaultStatus | null;
-  /// Lets the user insist they have a vault when the check says otherwise, so
-  /// a false negative is recoverable from the lock screen instead of dead-ending.
+  /// Lets the user reach the unlock form when the check says there is no vault.
   forceExisting: boolean;
   locked: boolean;
   authBusy: boolean;
@@ -469,16 +467,15 @@ export const useVaultStore = create<VaultState>((set, get) => ({
     try {
       [exists, status] = await Promise.all([api.vaultExists(), api.vaultStatus()]);
     } catch (e) {
-      // The lookup itself failed, so we know nothing about the vault. Saying
-      // "create one" here is how a recoverable vault looks like a lost one.
+      // The lookup failed, so we know nothing about the vault. Offering to
+      // create one here is how a recoverable vault looks like a lost one.
       set({ checkingVault: false, initError: String(e) });
       return;
     }
     set({ vaultExists: exists, vaultStatus: status, checkingVault: false });
     if (!exists) return;
 
-    // A keychain that refuses to answer is not a reason to stay out: fall
-    // through to the password prompt rather than surfacing an error.
+    // A keychain that refuses to answer falls through to the password prompt.
     let unlocked = false;
     try {
       unlocked = await api.vaultTryKeychain();

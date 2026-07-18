@@ -81,8 +81,8 @@ function App() {
     return <div style={loadingStyle} />;
   }
 
-  // A failed startup check is its own screen. Falling through to the lock
-  // screen here would offer to create a vault over one we merely failed to read.
+  // Falling through to the lock screen here would offer to create a vault
+  // over one we merely failed to read.
   if (initError) {
     return (
       <>

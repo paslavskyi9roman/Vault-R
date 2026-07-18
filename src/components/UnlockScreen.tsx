@@ -2,11 +2,6 @@ import { useState, type FormEvent, type ReactNode } from 'react';
 import { useVaultStore } from '../store/useVaultStore';
 import type { VaultStatus } from '../lib/api';
 
-// ---------------------------------------------------------------------------
-// Icons. Stroked line art at a single weight — no emoji, which never match the
-// text colour and read as decoration rather than interface.
-// ---------------------------------------------------------------------------
-
 const iconProps = {
   viewBox: '0 0 24 24',
   fill: 'none',
@@ -77,10 +72,6 @@ const EyeOffIcon = () => (
   </svg>
 );
 
-// ---------------------------------------------------------------------------
-// Manifest: what the app can see on disk before anything is unlocked.
-// ---------------------------------------------------------------------------
-
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -104,9 +95,8 @@ function ManifestRow({ term, children }: { term: string; children: ReactNode }) 
   );
 }
 
-/// A plain readout of the vault directory. It is always on screen, including —
-/// especially — when no vault was found, so "create a vault" is never the only
-/// thing the app has to say about secrets the user knows they saved.
+/// Stays on screen when no vault was found, so "create a vault" is never the
+/// only thing the app has to say about secrets the user knows they saved.
 function Manifest({ status }: { status: VaultStatus | null }) {
   if (!status) return null;
   const found = status.exists;
@@ -166,10 +156,6 @@ function Manifest({ status }: { status: VaultStatus | null }) {
     </div>
   );
 }
-
-// ---------------------------------------------------------------------------
-// Shared layout
-// ---------------------------------------------------------------------------
 
 function AuthLayout({ tagline, aside, children }: { tagline: string; aside?: ReactNode; children: ReactNode }) {
   return (
@@ -242,13 +228,8 @@ function Route({ icon, label, onClick }: { icon: ReactNode; label: string; onCli
   );
 }
 
-// ---------------------------------------------------------------------------
-// Screens
-// ---------------------------------------------------------------------------
-
-/// Shown when the startup check itself failed. Deliberately never offers to
-/// create a vault: we do not know whether one exists, and creating over a
-/// vault we simply failed to read is the one unrecoverable mistake here.
+/// Never offers to create a vault: we do not know whether one exists, and
+/// creating over a vault we failed to read is the unrecoverable mistake here.
 export function StartupErrorScreen() {
   const initError = useVaultStore((s) => s.initError);
   const vaultStatus = useVaultStore((s) => s.vaultStatus);
@@ -296,8 +277,6 @@ export function UnlockScreen() {
   const [remember, setRemember] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
 
-  // `forceExisting` lets someone who knows they have a vault reach the unlock
-  // form even if the lookup came back empty.
   const isCreate = !vaultExists && !forceExisting;
   const error = localError ?? authError;
 

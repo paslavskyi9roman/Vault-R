@@ -23,8 +23,6 @@ pub fn vault_exists() -> Result<bool, String> {
     Vault::exists().map_err(stringify)
 }
 
-/// Read-only description of the vault directory, shown on the lock screen so
-/// a failed lookup is always accompanied by the path it was looking in.
 #[tauri::command]
 pub fn vault_status() -> Result<VaultStatus, String> {
     Vault::status().map_err(stringify)
