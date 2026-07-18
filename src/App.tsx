@@ -7,6 +7,7 @@ import { Sidebar } from './components/Sidebar';
 import { MainPanel } from './components/MainPanel';
 import { HistorySlideover } from './components/HistorySlideover';
 import { CompareView } from './components/CompareView';
+import { SafetyPanel } from './components/SafetyPanel';
 import { ShareModal } from './components/ShareModal';
 import { ImportModal } from './components/ImportModal';
 import { CommandPalette } from './components/CommandPalette';
@@ -109,6 +110,7 @@ function App() {
 
       <HistorySlideover />
       <CompareView />
+      <SafetyPanel />
       <ShareModal />
       <ImportModal />
       <CommandPalette />

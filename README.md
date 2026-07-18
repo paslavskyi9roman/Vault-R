@@ -49,6 +49,29 @@ master password, and their plaintext `vault.meta.json` sidecar is removed.
 - **Auto-lock.** The vault locks itself after a configurable idle period (default 15 minutes), and locking
   reclaims any secret still on the clipboard.
 
+### Safety checks
+
+The *Safety* panel (and `vault scan` / `vault health`) answers a question you didn't ask: what is already
+wrong with the secrets you have?
+
+- **Git leak guard.** For every directory linked with `vault link`, Vault-R asks git what it can see: a
+  tracked `.env` file, a vault value pasted verbatim into a tracked file, or an untracked `.env` that
+  `.gitignore` does not cover. One click adds the missing `.gitignore` patterns.
+
+  Two things it deliberately does *not* do. It never puts a secret **value** in a finding — reports carry
+  key names, paths and line numbers, so they are safe to screenshot or paste into an issue. And it never
+  pretends `.gitignore` fixed a commit: anything already tracked is in your history, so the finding says
+  plainly that the credential is compromised and needs rotating (`git rm --cached` is your next step).
+  Rewriting history is out of scope, permanently.
+
+- **Secret health.** Empty values, placeholders (`changeme`, `your-api-key`, `xxx`), values untouched for
+  more than 90 days, and per-variable rotation policies that have elapsed. It also finds identical values
+  stored in different environments *without* being linked, and offers to link them in one click.
+
+Both err heavily toward silence — trivial values, plain configuration words like `production`, and
+`.env.example` files are excluded — because a scanner that cries wolf gets turned off once and never
+turned back on.
+
 ## Getting started
 
 ```sh
@@ -86,6 +109,14 @@ vault run -- node server.js     # resolves from the linked project
 vault unlink                    # remove the link for the current directory
 vault projects                  # list every linked directory
 
+# Safety checks. `scan` exits non-zero when it finds anything, so it works as a
+# pre-commit hook or a CI gate.
+vault scan                      # is anything in this repo visible to git?
+vault scan --linked             # …across every linked directory
+vault scan --fix                # also add the suggested .gitignore patterns
+vault health api-gateway/local  # empty, placeholder, stale and duplicated secrets
+vault health --all              # …across the whole vault
+
 vault gen --hex --length 32     # random secret to stdout (--base64 | --alnum | --words)
 vault env duplicate api-gateway/local staging --with-values  # copy an env's keys (blank values by default)
 
@@ -112,9 +143,13 @@ password prompt.
 Every destructive command prompts before acting; pass `--yes` (`-y`) to skip the prompt in scripts. A
 prompt that cannot be answered — a closed stdin, for instance — counts as "no".
 
-`run`, `export`, `import`, `get`, and `set` all accept an optional `<repo>/<env>` target; when it is
-omitted they resolve from the current directory via `vault link` (walking up to the nearest linked
-ancestor), and fail with an actionable message if nothing here was ever linked.
+`run`, `export`, `import`, `get`, `set`, `check` and `health` all accept an optional `<repo>/<env>` target;
+when it is omitted they resolve from the current directory via `vault link` (walking up to the nearest
+linked ancestor), and fail with an actionable message if nothing here was ever linked.
+
+`vault scan` needs `git` on your PATH — it asks git what is tracked rather than guessing — and says so
+rather than reporting a clean repository if git is missing. With `--fix` it exits non-zero only when a
+finding is already committed, since those need a rotation that no `.gitignore` edit can substitute for.
 
 ## Development
 
@@ -123,6 +158,9 @@ cargo test --workspace   # vault-core + vault-cli tests
 cargo clippy --workspace --all-targets
 npx tsc --noEmit
 ```
+
+The leak-guard tests build real git repositories in temp directories, so `git` must be on your PATH to
+run the full suite.
 
 See [.vscode/PLAN.md](.vscode/PLAN.md) for the original design/implementation plan and
 [.vscode/PHASE2.md](.vscode/PHASE2.md) for the plan that added the commands above.

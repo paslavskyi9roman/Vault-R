@@ -117,8 +117,15 @@ fn row_to_variable(row: &rusqlite::Row) -> rusqlite::Result<Variable> {
         group_id: row.get(4)?,
         description: row.get(5)?,
         required: row.get::<_, i64>(6)? != 0,
+        rotate_after_days: row.get(7)?,
     })
 }
+
+/// The column list every [`row_to_variable`] query selects, in order. Named
+/// once so a query that joins extra columns on the end (repo and environment
+/// names, say) can index past it without every call site having to count.
+const VARIABLE_COLUMNS: &str = "v.id, v.env_id, v.key, v.value, v.group_id, v.description, \
+                                v.required, v.rotate_after_days";
 
 impl Vault {
     // ---------------------------------------------------------------
@@ -654,7 +661,8 @@ impl Vault {
     fn get_variable(&self, id: &str) -> Result<Variable> {
         self.conn
             .query_row(
-                "SELECT id, env_id, key, value, group_id, description, required FROM variables WHERE id = ?1",
+                "SELECT id, env_id, key, value, group_id, description, required, rotate_after_days
+                 FROM variables WHERE id = ?1",
                 params![id],
                 row_to_variable,
             )
@@ -664,7 +672,8 @@ impl Vault {
 
     pub fn list_variables(&self, env_id: &str) -> Result<Vec<Variable>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, env_id, key, value, group_id, description, required FROM variables WHERE env_id = ?1 ORDER BY created_at",
+            "SELECT id, env_id, key, value, group_id, description, required, rotate_after_days
+             FROM variables WHERE env_id = ?1 ORDER BY created_at",
         )?;
         let rows = stmt.query_map(params![env_id], row_to_variable)?;
         let mut out = Vec::new();
@@ -718,6 +727,7 @@ impl Vault {
             group_id: None,
             description: None,
             required: false,
+            rotate_after_days: None,
         })
     }
 
@@ -788,22 +798,34 @@ impl Vault {
         Ok(())
     }
 
-    /// Sets a variable's documentation and whether `vault check` should
-    /// treat it as required. Deliberately not routed through the link-group
-    /// propagation path: groups sync *values*, exactly as key renames do --
-    /// descriptions and the required flag are per-environment documentation,
-    /// not part of what a link keeps in sync. Not snapshotted either, since
-    /// history is about value changes and restoring a snapshot does not
-    /// touch metadata.
+    /// Sets a variable's documentation, whether `vault check` should treat it
+    /// as required, and how long it may go untouched before the health panel
+    /// calls it due for rotation. Deliberately not routed through the
+    /// link-group propagation path: groups sync *values*, exactly as key
+    /// renames do -- descriptions, the required flag and the rotation policy
+    /// are per-environment documentation, not part of what a link keeps in
+    /// sync. Not snapshotted either, since history is about value changes and
+    /// restoring a snapshot does not touch metadata.
+    ///
+    /// A `rotate_after_days` of zero or less is rejected rather than stored:
+    /// a policy that is due the instant it is set would badge every row
+    /// forever, which is the same as no policy at all but noisier.
     pub fn set_variable_metadata(
         &self,
         var_id: &str,
         description: Option<&str>,
         required: bool,
+        rotate_after_days: Option<i64>,
     ) -> Result<()> {
+        if matches!(rotate_after_days, Some(d) if d <= 0) {
+            return Err(VaultError::InvalidInput(
+                "rotation interval must be at least one day".into(),
+            ));
+        }
         let affected = self.conn.execute(
-            "UPDATE variables SET description = ?1, required = ?2 WHERE id = ?3",
-            params![description, required as i64, var_id],
+            "UPDATE variables SET description = ?1, required = ?2, rotate_after_days = ?3
+             WHERE id = ?4",
+            params![description, required as i64, rotate_after_days, var_id],
         )?;
         if affected == 0 {
             return Err(VaultError::Missing(format!("variable {var_id}")));
@@ -1002,7 +1024,8 @@ impl Vault {
 
         let primary: Variable = tx
             .query_row(
-                "SELECT id, env_id, key, value, group_id, description, required FROM variables WHERE id = ?1",
+                "SELECT id, env_id, key, value, group_id, description, required, rotate_after_days
+                 FROM variables WHERE id = ?1",
                 params![var_ids[0]],
                 row_to_variable,
             )
@@ -1069,19 +1092,19 @@ impl Vault {
     }
 
     pub fn group_members(&self, group_id: &str) -> Result<Vec<GroupMember>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT v.id, v.env_id, v.key, v.value, v.group_id, v.description, v.required, r.name, e.name
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {VARIABLE_COLUMNS}, r.name, e.name
              FROM variables v
              JOIN environments e ON e.id = v.env_id
              JOIN repos r ON r.id = e.repo_id
              WHERE v.group_id = ?1
              ORDER BY r.name, e.name",
-        )?;
+        ))?;
         let rows = stmt.query_map(params![group_id], |row| {
             Ok(GroupMember {
                 variable: row_to_variable(row)?,
-                repo_name: row.get(7)?,
-                env_name: row.get(8)?,
+                repo_name: row.get(8)?,
+                env_name: row.get(9)?,
             })
         })?;
         let mut out = Vec::new();
@@ -1118,19 +1141,19 @@ impl Vault {
     /// against `var_id`.
     pub fn link_candidates(&self, var_id: &str) -> Result<Vec<GroupMember>> {
         let var = self.get_variable(var_id)?;
-        let mut stmt = self.conn.prepare(
-            "SELECT v.id, v.env_id, v.key, v.value, v.group_id, v.description, v.required, r.name, e.name
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {VARIABLE_COLUMNS}, r.name, e.name
              FROM variables v
              JOIN environments e ON e.id = v.env_id
              JOIN repos r ON r.id = e.repo_id
              WHERE v.key = ?1 AND v.id != ?2
              ORDER BY r.name, e.name",
-        )?;
+        ))?;
         let rows = stmt.query_map(params![var.key, var_id], |row| {
             Ok(GroupMember {
                 variable: row_to_variable(row)?,
-                repo_name: row.get(7)?,
-                env_name: row.get(8)?,
+                repo_name: row.get(8)?,
+                env_name: row.get(9)?,
             })
         })?;
         let mut out = Vec::new();

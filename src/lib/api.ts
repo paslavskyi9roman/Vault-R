@@ -34,6 +34,7 @@ export interface Variable {
   groupId: string | null;
   description: string | null;
   required: boolean;
+  rotateAfterDays: number | null;
 }
 
 export interface VariableWithUsage extends Variable {
@@ -93,6 +94,74 @@ export interface UnlinkedMatch {
   varB: Variable;
 }
 
+/// One problem the git leak guard found. Deliberately carries key names and
+/// file locations but never secret values — the panel that renders these is
+/// meant to be safe to screenshot.
+export interface LeakFinding {
+  kind: 'trackedEnvFile' | 'trackedValue' | 'unignoredEnvFile';
+  severity: 'critical' | 'warning';
+  path: string;
+  line: number | null;
+  key: string | null;
+  repoName: string | null;
+  envName: string | null;
+  detail: string;
+  fixPattern: string | null;
+  /// True when the secret is already in git history, which .gitignore cannot
+  /// undo — the value has to be rotated.
+  needsRotation: boolean;
+}
+
+export interface LeakReport {
+  path: string;
+  gitRoot: string | null;
+  note: string | null;
+  filesScanned: number;
+  findings: LeakFinding[];
+}
+
+export interface HealthIssue {
+  kind: 'empty' | 'placeholder' | 'stale' | 'rotationDue';
+  severity: 'critical' | 'warning';
+  detail: string;
+}
+
+export interface SecretHealthRow {
+  varId: string;
+  key: string;
+  envId: string;
+  repoName: string;
+  envName: string;
+  updatedAt: string;
+  ageDays: number;
+  rotateAfterDays: number | null;
+  issues: HealthIssue[];
+}
+
+export interface DuplicateLocation {
+  varId: string;
+  key: string;
+  envId: string;
+  repoName: string;
+  envName: string;
+}
+
+export interface DuplicateValueGroup {
+  /// Empty when the same value is stored under different key names.
+  key: string;
+  locations: DuplicateLocation[];
+}
+
+export interface HealthReport {
+  rows: SecretHealthRow[];
+  duplicates: DuplicateValueGroup[];
+  totalSecrets: number;
+  emptyCount: number;
+  placeholderCount: number;
+  staleCount: number;
+  rotationDueCount: number;
+}
+
 export interface ProjectInfo {
   id: string;
   path: string;
@@ -145,8 +214,12 @@ export const api = {
   renameVariableKey: (varId: string, newKey: string) =>
     invoke<void>('rename_variable_key', { varId, newKey }),
   deleteVariable: (varId: string) => invoke<void>('delete_variable', { varId }),
-  setVariableMetadata: (varId: string, description: string | null, required: boolean) =>
-    invoke<void>('set_variable_metadata', { varId, description, required }),
+  setVariableMetadata: (
+    varId: string,
+    description: string | null,
+    required: boolean,
+    rotateAfterDays: number | null,
+  ) => invoke<void>('set_variable_metadata', { varId, description, required, rotateAfterDays }),
   deleteVariables: (varIds: string[]) => invoke<void>('delete_variables', { varIds }),
   moveVariables: (varIds: string[], targetEnvId: string) =>
     invoke<void>('move_variables', { varIds, targetEnvId }),
@@ -197,6 +270,12 @@ export const api = {
 
   generateSecret: (kind: GeneratorKind, length: number) =>
     invoke<string>('generate_secret', { kind, length }),
+
+  scanLinkedProjects: () => invoke<LeakReport[]>('scan_linked_projects'),
+  scanDirectory: (path: string) => invoke<LeakReport>('scan_directory', { path }),
+  applyGitignorePatterns: (gitRoot: string, patterns: string[]) =>
+    invoke<number>('apply_gitignore_patterns', { gitRoot, patterns }),
+  healthReport: () => invoke<HealthReport>('health_report'),
 };
 
 export type GeneratorKind = 'hex' | 'base64' | 'alnum' | 'words';

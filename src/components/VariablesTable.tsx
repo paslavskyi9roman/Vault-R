@@ -285,13 +285,30 @@ function VariableDetail({ variable }: { variable: VariableWithUsage }) {
   const commitVariableMetadata = useVaultStore((s) => s.commitVariableMetadata);
   const [description, setDescription] = useState(variable.description ?? '');
   const [required, setRequired] = useState(variable.required);
+  const [rotateAfter, setRotateAfter] = useState(
+    variable.rotateAfterDays === null ? '' : String(variable.rotateAfterDays),
+  );
   useEffect(() => {
     setDescription(variable.description ?? '');
     setRequired(variable.required);
-  }, [variable.id, variable.description, variable.required]);
+    setRotateAfter(variable.rotateAfterDays === null ? '' : String(variable.rotateAfterDays));
+  }, [variable.id, variable.description, variable.required, variable.rotateAfterDays]);
 
-  function commit(nextDescription: string, nextRequired: boolean) {
-    void commitVariableMetadata(variable.id, nextDescription, nextRequired);
+  /// An unparseable or non-positive interval means "no policy" rather than an
+  /// error toast on every keystroke — the field is cleared to say the same
+  /// thing, so treating them alike is what the user expects.
+  function parseRotation(raw: string): number | null {
+    const parsed = Number(raw.trim());
+    return raw.trim() && Number.isFinite(parsed) && parsed >= 1 ? Math.floor(parsed) : null;
+  }
+
+  function commit(nextDescription: string, nextRequired: boolean, nextRotation: string) {
+    void commitVariableMetadata(
+      variable.id,
+      nextDescription,
+      nextRequired,
+      parseRotation(nextRotation),
+    );
   }
 
   return (
@@ -301,7 +318,7 @@ function VariableDetail({ variable }: { variable: VariableWithUsage }) {
         placeholder="What is this for? (e.g. get this from the Stripe dashboard)"
         value={description}
         onChange={(e) => setDescription(e.target.value)}
-        onBlur={() => commit(description, required)}
+        onBlur={() => commit(description, required, rotateAfter)}
         rows={2}
       />
       <label style={detailRequiredLabelStyle}>
@@ -310,10 +327,23 @@ function VariableDetail({ variable }: { variable: VariableWithUsage }) {
           checked={required}
           onChange={(e) => {
             setRequired(e.target.checked);
-            commit(description, e.target.checked);
+            commit(description, e.target.checked, rotateAfter);
           }}
         />
         Required (gates <code>vault check</code>)
+      </label>
+      <label style={detailRequiredLabelStyle}>
+        Rotate every
+        <input
+          style={detailRotationInputStyle}
+          type="number"
+          min={1}
+          placeholder="—"
+          value={rotateAfter}
+          onChange={(e) => setRotateAfter(e.target.value)}
+          onBlur={() => commit(description, required, rotateAfter)}
+        />
+        days (blank = no reminder)
       </label>
     </div>
   );
@@ -439,6 +469,17 @@ const detailRequiredLabelStyle: React.CSSProperties = {
   gap: '6px',
   fontSize: '12px',
   color: 'var(--text-dim)',
+};
+const detailRotationInputStyle: React.CSSProperties = {
+  width: '58px',
+  fontFamily: 'var(--font-mono)',
+  fontSize: '12px',
+  background: 'var(--panel-2)',
+  border: '1px solid var(--border)',
+  borderRadius: '5px',
+  color: 'var(--text)',
+  padding: '3px 6px',
+  outline: 'none',
 };
 const keyInputStyle: React.CSSProperties = {
   width: '100%',
