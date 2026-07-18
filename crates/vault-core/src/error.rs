@@ -24,6 +24,11 @@ pub enum VaultError {
     Keyring(String),
     #[error("invalid input: {0}")]
     InvalidInput(String),
+    #[error(
+        "this vault was created by a newer version of Vault-R (schema {found}, this build \
+         supports up to {supported}) — update Vault-R to open it"
+    )]
+    FutureSchema { found: i32, supported: i32 },
 }
 
 pub type Result<T> = std::result::Result<T, VaultError>;

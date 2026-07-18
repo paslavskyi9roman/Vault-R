@@ -890,6 +890,639 @@ fn a_legacy_v1_vault_is_not_backed_up_until_it_is_upgraded() {
     assert!(vault.rotate_backup().unwrap().is_some());
 }
 
+// ---------------------------------------------------------------------
+// Bulk operations
+// ---------------------------------------------------------------------
+
+#[test]
+fn delete_variables_removes_a_selection_and_snapshots_once_per_env() {
+    let dir = temp_dir();
+    let vault = Vault::create_in(dir.path(), "pw").unwrap();
+    let repo = vault.create_repo("r").unwrap();
+    let env_a = vault.create_environment(&repo.id, "local").unwrap();
+    let env_b = vault.create_environment(&repo.id, "staging").unwrap();
+    let a1 = vault.add_variable(&env_a.id, "A1", "1").unwrap();
+    let a2 = vault.add_variable(&env_a.id, "A2", "2").unwrap();
+    vault.add_variable(&env_a.id, "A3", "3").unwrap();
+    let b1 = vault.add_variable(&env_b.id, "B1", "1").unwrap();
+
+    let snaps_a_before = vault.list_snapshots(&env_a.id).unwrap().len();
+    let snaps_b_before = vault.list_snapshots(&env_b.id).unwrap().len();
+
+    vault
+        .delete_variables(&[a1.id.clone(), a2.id.clone(), b1.id.clone()])
+        .unwrap();
+
+    let remaining_a = vault.list_variables(&env_a.id).unwrap();
+    assert_eq!(remaining_a.len(), 1);
+    assert_eq!(remaining_a[0].key, "A3");
+    assert!(vault.list_variables(&env_b.id).unwrap().is_empty());
+
+    // one snapshot per affected environment, not one per deleted variable
+    assert_eq!(vault.list_snapshots(&env_a.id).unwrap().len(), snaps_a_before + 1);
+    assert_eq!(vault.list_snapshots(&env_b.id).unwrap().len(), snaps_b_before + 1);
+}
+
+#[test]
+fn deleting_a_bulk_selection_dissolves_orphaned_link_groups() {
+    let dir = temp_dir();
+    let vault = Vault::create_in(dir.path(), "pw").unwrap();
+    let repo = vault.create_repo("r").unwrap();
+    let env_a = vault.create_environment(&repo.id, "local").unwrap();
+    let env_b = vault.create_environment(&repo.id, "staging").unwrap();
+    let a = vault.add_variable(&env_a.id, "K", "v").unwrap();
+    let b = vault.add_variable(&env_b.id, "K", "v").unwrap();
+    vault.link_variables(&[a.id.clone(), b.id.clone()]).unwrap();
+
+    vault.delete_variables(std::slice::from_ref(&a.id)).unwrap();
+
+    let survivors = vault.list_variables(&env_b.id).unwrap();
+    assert_eq!(survivors[0].group_id, None);
+    assert_eq!(vault.linked_group_count().unwrap(), 0);
+}
+
+#[test]
+fn delete_variables_skips_unknown_ids_without_erroring() {
+    let dir = temp_dir();
+    let vault = Vault::create_in(dir.path(), "pw").unwrap();
+    let repo = vault.create_repo("r").unwrap();
+    let env = vault.create_environment(&repo.id, "local").unwrap();
+    let v = vault.add_variable(&env.id, "K", "v").unwrap();
+
+    vault.delete_variables(&[v.id.clone(), "nope".to_string()]).unwrap();
+    assert!(vault.list_variables(&env.id).unwrap().is_empty());
+}
+
+#[test]
+fn move_variables_relocates_and_removes_the_originals() {
+    let dir = temp_dir();
+    let vault = Vault::create_in(dir.path(), "pw").unwrap();
+    let repo = vault.create_repo("r").unwrap();
+    let env_a = vault.create_environment(&repo.id, "local").unwrap();
+    let env_b = vault.create_environment(&repo.id, "staging").unwrap();
+    let v1 = vault.add_variable(&env_a.id, "K1", "1").unwrap();
+    let v2 = vault.add_variable(&env_a.id, "K2", "2").unwrap();
+
+    vault.move_variables(&[v1.id.clone(), v2.id.clone()], &env_b.id).unwrap();
+
+    assert!(vault.list_variables(&env_a.id).unwrap().is_empty());
+    let mut moved = vault.list_variables(&env_b.id).unwrap();
+    moved.sort_by(|a, b| a.key.cmp(&b.key));
+    assert_eq!(moved.len(), 2);
+    assert_eq!(moved[0].key, "K1");
+    assert_eq!(moved[0].value, "1");
+    assert_eq!(moved[1].key, "K2");
+}
+
+#[test]
+fn moving_onto_an_existing_key_updates_it_in_place_and_propagates_its_group() {
+    let dir = temp_dir();
+    let vault = Vault::create_in(dir.path(), "pw").unwrap();
+    let repo = vault.create_repo("r").unwrap();
+    let env_a = vault.create_environment(&repo.id, "local").unwrap();
+    let env_b = vault.create_environment(&repo.id, "staging").unwrap();
+    let env_c = vault.create_environment(&repo.id, "production").unwrap();
+
+    let source = vault.add_variable(&env_a.id, "KEY", "fresh").unwrap();
+    let target = vault.add_variable(&env_b.id, "KEY", "stale").unwrap();
+    let linked_partner = vault.add_variable(&env_c.id, "KEY", "stale").unwrap();
+    vault
+        .link_variables(&[target.id.clone(), linked_partner.id.clone()])
+        .unwrap();
+
+    vault.move_variables(std::slice::from_ref(&source.id), &env_b.id).unwrap();
+
+    assert!(vault.list_variables(&env_a.id).unwrap().is_empty());
+    assert_eq!(vault.list_variables(&env_b.id).unwrap()[0].value, "fresh");
+    // the pre-existing target was linked; that propagation still happened
+    assert_eq!(vault.list_variables(&env_c.id).unwrap()[0].value, "fresh");
+}
+
+#[test]
+fn a_moved_variable_does_not_carry_its_link_group_to_the_new_row() {
+    let dir = temp_dir();
+    let vault = Vault::create_in(dir.path(), "pw").unwrap();
+    let repo = vault.create_repo("r").unwrap();
+    let env_a = vault.create_environment(&repo.id, "local").unwrap();
+    let env_b = vault.create_environment(&repo.id, "staging").unwrap();
+    let env_c = vault.create_environment(&repo.id, "elsewhere").unwrap();
+
+    let a = vault.add_variable(&env_a.id, "K", "v").unwrap();
+    let b = vault.add_variable(&env_b.id, "K", "v").unwrap();
+    vault.link_variables(&[a.id.clone(), b.id.clone()]).unwrap();
+
+    vault.move_variables(std::slice::from_ref(&a.id), &env_c.id).unwrap();
+
+    let moved = vault.list_variables(&env_c.id).unwrap();
+    assert_eq!(moved[0].group_id, None);
+    // the group had only one member left (b), so it dissolved
+    assert_eq!(vault.list_variables(&env_b.id).unwrap()[0].group_id, None);
+}
+
+#[test]
+fn move_variables_snapshots_source_and_target_once_each() {
+    let dir = temp_dir();
+    let vault = Vault::create_in(dir.path(), "pw").unwrap();
+    let repo = vault.create_repo("r").unwrap();
+    let env_a = vault.create_environment(&repo.id, "local").unwrap();
+    let env_b = vault.create_environment(&repo.id, "staging").unwrap();
+    let v1 = vault.add_variable(&env_a.id, "K1", "1").unwrap();
+    let v2 = vault.add_variable(&env_a.id, "K2", "2").unwrap();
+    let v3 = vault.add_variable(&env_a.id, "K3", "3").unwrap();
+
+    let snaps_a_before = vault.list_snapshots(&env_a.id).unwrap().len();
+    let snaps_b_before = vault.list_snapshots(&env_b.id).unwrap().len();
+
+    vault
+        .move_variables(&[v1.id.clone(), v2.id.clone(), v3.id.clone()], &env_b.id)
+        .unwrap();
+
+    assert_eq!(vault.list_snapshots(&env_a.id).unwrap().len(), snaps_a_before + 1);
+    assert_eq!(vault.list_snapshots(&env_b.id).unwrap().len(), snaps_b_before + 1);
+}
+
+// ---------------------------------------------------------------------
+// Variable metadata: description, required, and `vault check`
+// ---------------------------------------------------------------------
+
+#[test]
+fn required_and_empty_fails_check_required_and_set_passes() {
+    let dir = temp_dir();
+    let vault = Vault::create_in(dir.path(), "pw").unwrap();
+    let repo = vault.create_repo("r").unwrap();
+    let env = vault.create_environment(&repo.id, "local").unwrap();
+    let required_var = vault.add_variable(&env.id, "REQUIRED_KEY", "").unwrap();
+    vault.add_variable(&env.id, "OPTIONAL_KEY", "").unwrap();
+
+    vault.set_variable_metadata(&required_var.id, Some("needed for X"), true).unwrap();
+
+    let missing = vault.required_and_empty(&env.id).unwrap();
+    assert_eq!(missing.len(), 1);
+    assert_eq!(missing[0].key, "REQUIRED_KEY");
+
+    vault.update_variable_value(&required_var.id, "now-set").unwrap();
+    assert!(vault.required_and_empty(&env.id).unwrap().is_empty());
+}
+
+#[test]
+fn whitespace_only_value_still_counts_as_empty_for_required() {
+    let dir = temp_dir();
+    let vault = Vault::create_in(dir.path(), "pw").unwrap();
+    let repo = vault.create_repo("r").unwrap();
+    let env = vault.create_environment(&repo.id, "local").unwrap();
+    let v = vault.add_variable(&env.id, "K", "   ").unwrap();
+    vault.set_variable_metadata(&v.id, None, true).unwrap();
+
+    assert_eq!(vault.required_and_empty(&env.id).unwrap().len(), 1);
+}
+
+#[test]
+fn descriptions_and_required_survive_export_import_round_trip_but_export_omits_them() {
+    let dir = temp_dir();
+    let vault = Vault::create_in(dir.path(), "pw").unwrap();
+    let repo = vault.create_repo("r").unwrap();
+    let env = vault.create_environment(&repo.id, "local").unwrap();
+    let v = vault.add_variable(&env.id, "KEY", "value").unwrap();
+    vault
+        .set_variable_metadata(&v.id, Some("get this from the dashboard"), true)
+        .unwrap();
+
+    let exported = vault.export_env_text(&env.id).unwrap();
+    // metadata is vault-internal, never written into .env content
+    assert!(!exported.contains("get this from the dashboard"));
+    assert!(!exported.to_lowercase().contains("required"));
+    assert_eq!(exported.trim(), "KEY=value");
+
+    // importing that text into a fresh environment carries no metadata --
+    // it is vault metadata, not `.env` content, so there is nothing to import
+    let other = vault.create_environment(&repo.id, "staging").unwrap();
+    vault.import_env_text(&other.id, &exported).unwrap();
+    let imported = &vault.list_variables(&other.id).unwrap()[0];
+    assert_eq!(imported.description, None);
+    assert!(!imported.required);
+
+    // and the original variable's own metadata is untouched by any of this
+    let original = vault.list_variables(&env.id).unwrap();
+    let original = original.iter().find(|x| x.key == "KEY").unwrap();
+    assert_eq!(original.description.as_deref(), Some("get this from the dashboard"));
+    assert!(original.required);
+}
+
+#[test]
+fn setting_metadata_does_not_propagate_across_a_link_group() {
+    let dir = temp_dir();
+    let vault = Vault::create_in(dir.path(), "pw").unwrap();
+    let repo = vault.create_repo("r").unwrap();
+    let env_a = vault.create_environment(&repo.id, "local").unwrap();
+    let env_b = vault.create_environment(&repo.id, "staging").unwrap();
+    let a = vault.add_variable(&env_a.id, "K", "v").unwrap();
+    let b = vault.add_variable(&env_b.id, "K", "v").unwrap();
+    vault.link_variables(&[a.id.clone(), b.id.clone()]).unwrap();
+
+    vault.set_variable_metadata(&a.id, Some("only on A"), true).unwrap();
+
+    let a_after = vault.list_variables(&env_a.id).unwrap();
+    let b_after = vault.list_variables(&env_b.id).unwrap();
+    assert_eq!(a_after[0].description.as_deref(), Some("only on A"));
+    assert!(a_after[0].required);
+    // the group still syncs values, but metadata stayed local to A
+    assert_eq!(b_after[0].description, None);
+    assert!(!b_after[0].required);
+}
+
+#[test]
+fn setting_metadata_on_a_missing_variable_is_reported() {
+    let dir = temp_dir();
+    let vault = Vault::create_in(dir.path(), "pw").unwrap();
+    assert!(matches!(
+        vault.set_variable_metadata("nope", Some("x"), true).unwrap_err(),
+        VaultError::Missing(_)
+    ));
+}
+
+// ---------------------------------------------------------------------
+// Duplicate environment
+// ---------------------------------------------------------------------
+
+#[test]
+fn duplicating_with_values_copies_keys_and_values() {
+    let dir = temp_dir();
+    let vault = Vault::create_in(dir.path(), "pw").unwrap();
+    let repo = vault.create_repo("r").unwrap();
+    let local = vault.create_environment(&repo.id, "local").unwrap();
+    vault.add_variable(&local.id, "A", "1").unwrap();
+    vault.add_variable(&local.id, "B", "2").unwrap();
+
+    let staging = vault.duplicate_environment(&local.id, "staging", true).unwrap();
+    assert_eq!(staging.name, "staging");
+    assert_eq!(staging.repo_id, repo.id);
+
+    let mut copied = vault.list_variables(&staging.id).unwrap();
+    copied.sort_by(|a, b| a.key.cmp(&b.key));
+    assert_eq!(copied.len(), 2);
+    assert_eq!(copied[0].key, "A");
+    assert_eq!(copied[0].value, "1");
+    assert_eq!(copied[1].value, "2");
+    // duplicated variables are not linked to their originals
+    assert!(copied.iter().all(|v| v.group_id.is_none()));
+}
+
+#[test]
+fn duplicating_without_values_copies_keys_but_blanks_values() {
+    let dir = temp_dir();
+    let vault = Vault::create_in(dir.path(), "pw").unwrap();
+    let repo = vault.create_repo("r").unwrap();
+    let prod = vault.create_environment(&repo.id, "production").unwrap();
+    vault.add_variable(&prod.id, "SECRET", "live-value").unwrap();
+
+    let staging = vault.duplicate_environment(&prod.id, "staging", false).unwrap();
+    let copied = vault.list_variables(&staging.id).unwrap();
+    assert_eq!(copied.len(), 1);
+    assert_eq!(copied[0].key, "SECRET");
+    assert_eq!(copied[0].value, "");
+}
+
+#[test]
+fn duplicating_an_empty_environment_creates_an_empty_one_with_no_snapshot() {
+    let dir = temp_dir();
+    let vault = Vault::create_in(dir.path(), "pw").unwrap();
+    let repo = vault.create_repo("r").unwrap();
+    let empty = vault.create_environment(&repo.id, "local").unwrap();
+
+    let dup = vault.duplicate_environment(&empty.id, "staging", true).unwrap();
+    assert!(vault.list_variables(&dup.id).unwrap().is_empty());
+    assert!(vault.list_snapshots(&dup.id).unwrap().is_empty());
+}
+
+#[test]
+fn duplicating_onto_an_existing_environment_name_is_rejected() {
+    let dir = temp_dir();
+    let vault = Vault::create_in(dir.path(), "pw").unwrap();
+    let repo = vault.create_repo("r").unwrap();
+    let local = vault.create_environment(&repo.id, "local").unwrap();
+    vault.create_environment(&repo.id, "staging").unwrap();
+
+    let err = vault.duplicate_environment(&local.id, "staging", true).unwrap_err();
+    assert!(matches!(err, VaultError::Duplicate(_)));
+}
+
+// ---------------------------------------------------------------------
+// Project auto-detection
+// ---------------------------------------------------------------------
+
+#[test]
+fn resolving_an_unlinked_directory_finds_nothing() {
+    let dir = temp_dir();
+    let vault = Vault::create_in(dir.path(), "pw").unwrap();
+    let elsewhere = temp_dir();
+    assert!(vault.resolve_project(elsewhere.path()).unwrap().is_none());
+}
+
+#[test]
+fn linking_a_directory_makes_it_resolve() {
+    let dir = temp_dir();
+    let vault = Vault::create_in(dir.path(), "pw").unwrap();
+    let repo = vault.create_repo("api-gateway").unwrap();
+    let env = vault.create_environment(&repo.id, "local").unwrap();
+    let project_dir = temp_dir();
+
+    vault.link_project(project_dir.path(), &env.id).unwrap();
+
+    let (resolved_repo, resolved_env) = vault.resolve_project(project_dir.path()).unwrap().unwrap();
+    assert_eq!(resolved_repo.name, "api-gateway");
+    assert_eq!(resolved_env.name, "local");
+}
+
+#[test]
+fn resolving_a_subdirectory_of_a_linked_directory_finds_it() {
+    let dir = temp_dir();
+    let vault = Vault::create_in(dir.path(), "pw").unwrap();
+    let repo = vault.create_repo("r").unwrap();
+    let env = vault.create_environment(&repo.id, "local").unwrap();
+    let project_dir = temp_dir();
+    let nested = project_dir.path().join("src").join("deep");
+    std::fs::create_dir_all(&nested).unwrap();
+
+    vault.link_project(project_dir.path(), &env.id).unwrap();
+
+    let (_, resolved_env) = vault.resolve_project(&nested).unwrap().unwrap();
+    assert_eq!(resolved_env.id, env.id);
+}
+
+#[test]
+fn nearest_ancestor_link_wins_over_a_link_further_up() {
+    let dir = temp_dir();
+    let vault = Vault::create_in(dir.path(), "pw").unwrap();
+    let repo = vault.create_repo("r").unwrap();
+    let outer_env = vault.create_environment(&repo.id, "outer").unwrap();
+    let inner_env = vault.create_environment(&repo.id, "inner").unwrap();
+
+    let outer_dir = temp_dir();
+    let inner_dir = outer_dir.path().join("packages").join("app");
+    std::fs::create_dir_all(&inner_dir).unwrap();
+
+    vault.link_project(outer_dir.path(), &outer_env.id).unwrap();
+    vault.link_project(&inner_dir, &inner_env.id).unwrap();
+
+    let (_, resolved) = vault.resolve_project(&inner_dir).unwrap().unwrap();
+    assert_eq!(resolved.id, inner_env.id);
+
+    // a directory between the two still resolves to the outer link
+    let between = outer_dir.path().join("packages");
+    let (_, resolved_between) = vault.resolve_project(&between).unwrap().unwrap();
+    assert_eq!(resolved_between.id, outer_env.id);
+}
+
+#[test]
+fn relinking_the_same_path_repoints_it_instead_of_erroring() {
+    let dir = temp_dir();
+    let vault = Vault::create_in(dir.path(), "pw").unwrap();
+    let repo = vault.create_repo("r").unwrap();
+    let env_a = vault.create_environment(&repo.id, "a").unwrap();
+    let env_b = vault.create_environment(&repo.id, "b").unwrap();
+    let project_dir = temp_dir();
+
+    vault.link_project(project_dir.path(), &env_a.id).unwrap();
+    vault.link_project(project_dir.path(), &env_b.id).unwrap();
+
+    let (_, resolved) = vault.resolve_project(project_dir.path()).unwrap().unwrap();
+    assert_eq!(resolved.id, env_b.id);
+    assert_eq!(vault.list_projects().unwrap().len(), 1);
+}
+
+#[test]
+fn unlinking_a_directory_makes_it_resolve_to_nothing_again() {
+    let dir = temp_dir();
+    let vault = Vault::create_in(dir.path(), "pw").unwrap();
+    let repo = vault.create_repo("r").unwrap();
+    let env = vault.create_environment(&repo.id, "local").unwrap();
+    let project_dir = temp_dir();
+
+    vault.link_project(project_dir.path(), &env.id).unwrap();
+    vault.unlink_project(project_dir.path()).unwrap();
+
+    assert!(vault.resolve_project(project_dir.path()).unwrap().is_none());
+    assert!(vault.list_projects().unwrap().is_empty());
+}
+
+#[test]
+fn unlinking_something_never_linked_is_reported_not_fatal() {
+    let dir = temp_dir();
+    let vault = Vault::create_in(dir.path(), "pw").unwrap();
+    let never_linked = temp_dir();
+    assert!(matches!(
+        vault.unlink_project(never_linked.path()).unwrap_err(),
+        VaultError::Missing(_)
+    ));
+}
+
+#[test]
+fn deleting_an_environment_cascades_its_project_links() {
+    let dir = temp_dir();
+    let vault = Vault::create_in(dir.path(), "pw").unwrap();
+    let repo = vault.create_repo("r").unwrap();
+    let env = vault.create_environment(&repo.id, "local").unwrap();
+    let project_dir = temp_dir();
+    vault.link_project(project_dir.path(), &env.id).unwrap();
+    assert_eq!(vault.list_projects().unwrap().len(), 1);
+
+    vault.delete_environment(&env.id).unwrap();
+
+    assert!(vault.list_projects().unwrap().is_empty());
+    assert!(vault.resolve_project(project_dir.path()).unwrap().is_none());
+}
+
+#[test]
+fn a_stale_linked_directory_is_pruned_on_listing_rather_than_erroring() {
+    let dir = temp_dir();
+    let vault = Vault::create_in(dir.path(), "pw").unwrap();
+    let repo = vault.create_repo("r").unwrap();
+    let env = vault.create_environment(&repo.id, "local").unwrap();
+    let doomed = temp_dir();
+    vault.link_project(doomed.path(), &env.id).unwrap();
+    assert_eq!(vault.list_projects().unwrap().len(), 1);
+
+    drop(doomed); // removes the temp directory from disk
+
+    let projects = vault.list_projects().unwrap();
+    assert!(projects.is_empty());
+    // the prune persisted: it is still gone on a fresh listing
+    assert!(vault.list_projects().unwrap().is_empty());
+}
+
+// ---------------------------------------------------------------------
+// Environment diff and sync
+// ---------------------------------------------------------------------
+
+#[test]
+fn diff_environments_reports_the_add_remove_change_matrix() {
+    let dir = temp_dir();
+    let vault = Vault::create_in(dir.path(), "pw").unwrap();
+    let repo = vault.create_repo("r").unwrap();
+    let env_a = vault.create_environment(&repo.id, "local").unwrap();
+    let env_b = vault.create_environment(&repo.id, "staging").unwrap();
+
+    vault.add_variable(&env_a.id, "SAME", "same").unwrap();
+    vault.add_variable(&env_b.id, "SAME", "same").unwrap();
+    vault.add_variable(&env_a.id, "ONLY_A", "a").unwrap();
+    vault.add_variable(&env_b.id, "ONLY_B", "b").unwrap();
+    vault.add_variable(&env_a.id, "DIFFERS", "old").unwrap();
+    vault.add_variable(&env_b.id, "DIFFERS", "new").unwrap();
+
+    let rows = vault.diff_environments(&env_a.id, &env_b.id).unwrap();
+    let kinds: Vec<(&str, &str)> = rows.iter().map(|r| (r.key.as_str(), r.kind.as_str())).collect();
+    assert_eq!(
+        kinds,
+        vec![
+            ("DIFFERS", "changed"),
+            ("ONLY_A", "removed"),
+            ("ONLY_B", "added"),
+        ]
+    );
+    assert!(!rows.iter().any(|r| r.key == "SAME"));
+
+    let changed = rows.iter().find(|r| r.key == "DIFFERS").unwrap();
+    assert_eq!(changed.old_value.as_deref(), Some("old"));
+    assert_eq!(changed.new_value.as_deref(), Some("new"));
+}
+
+#[test]
+fn diffing_an_environment_against_itself_is_empty() {
+    let dir = temp_dir();
+    let vault = Vault::create_in(dir.path(), "pw").unwrap();
+    let repo = vault.create_repo("r").unwrap();
+    let env = vault.create_environment(&repo.id, "local").unwrap();
+    vault.add_variable(&env.id, "A", "1").unwrap();
+    vault.add_variable(&env.id, "B", "2").unwrap();
+
+    assert!(vault.diff_environments(&env.id, &env.id).unwrap().is_empty());
+}
+
+#[test]
+fn copy_variable_to_env_creates_when_missing_and_updates_when_present() {
+    let dir = temp_dir();
+    let vault = Vault::create_in(dir.path(), "pw").unwrap();
+    let repo = vault.create_repo("r").unwrap();
+    let env_a = vault.create_environment(&repo.id, "local").unwrap();
+    let env_b = vault.create_environment(&repo.id, "staging").unwrap();
+    let source = vault.add_variable(&env_a.id, "KEY", "value").unwrap();
+
+    // target has nothing yet: creates a new unlinked variable
+    vault.copy_variable_to_env(&source.id, &env_b.id).unwrap();
+    let b_vars = vault.list_variables(&env_b.id).unwrap();
+    assert_eq!(b_vars.len(), 1);
+    assert_eq!(b_vars[0].key, "KEY");
+    assert_eq!(b_vars[0].value, "value");
+    assert_eq!(b_vars[0].group_id, None);
+
+    // source changes, copy again: updates the existing target variable in place
+    vault.update_variable_value(&source.id, "rotated").unwrap();
+    vault.copy_variable_to_env(&source.id, &env_b.id).unwrap();
+    let b_vars = vault.list_variables(&env_b.id).unwrap();
+    assert_eq!(b_vars.len(), 1);
+    assert_eq!(b_vars[0].value, "rotated");
+}
+
+#[test]
+fn copy_variable_to_env_propagates_through_the_targets_link_group() {
+    let dir = temp_dir();
+    let vault = Vault::create_in(dir.path(), "pw").unwrap();
+    let repo = vault.create_repo("r").unwrap();
+    let env_a = vault.create_environment(&repo.id, "local").unwrap();
+    let env_b = vault.create_environment(&repo.id, "staging").unwrap();
+    let env_c = vault.create_environment(&repo.id, "production").unwrap();
+
+    let source = vault.add_variable(&env_a.id, "KEY", "fresh").unwrap();
+    let target_b = vault.add_variable(&env_b.id, "KEY", "old").unwrap();
+    let linked_c = vault.add_variable(&env_c.id, "KEY", "old").unwrap();
+    vault
+        .link_variables(&[target_b.id.clone(), linked_c.id.clone()])
+        .unwrap();
+
+    vault.copy_variable_to_env(&source.id, &env_b.id).unwrap();
+
+    // both members of env_b's link group picked up the copied value
+    assert_eq!(vault.list_variables(&env_b.id).unwrap()[0].value, "fresh");
+    assert_eq!(vault.list_variables(&env_c.id).unwrap()[0].value, "fresh");
+}
+
+#[test]
+fn copy_key_to_env_resolves_the_source_by_key() {
+    let dir = temp_dir();
+    let vault = Vault::create_in(dir.path(), "pw").unwrap();
+    let repo = vault.create_repo("r").unwrap();
+    let env_a = vault.create_environment(&repo.id, "local").unwrap();
+    let env_b = vault.create_environment(&repo.id, "staging").unwrap();
+    vault.add_variable(&env_a.id, "KEY", "value").unwrap();
+
+    vault.copy_key_to_env(&env_a.id, &env_b.id, "KEY").unwrap();
+    assert_eq!(vault.list_variables(&env_b.id).unwrap()[0].value, "value");
+
+    assert!(matches!(
+        vault.copy_key_to_env(&env_a.id, &env_b.id, "NOPE").unwrap_err(),
+        VaultError::Missing(_)
+    ));
+}
+
+#[test]
+fn copy_missing_to_env_only_fills_gaps_and_snapshots_once() {
+    let dir = temp_dir();
+    let vault = Vault::create_in(dir.path(), "pw").unwrap();
+    let repo = vault.create_repo("r").unwrap();
+    let env_a = vault.create_environment(&repo.id, "local").unwrap();
+    let env_b = vault.create_environment(&repo.id, "staging").unwrap();
+    vault.add_variable(&env_a.id, "SHARED", "a-value").unwrap();
+    vault.add_variable(&env_a.id, "MISSING_1", "m1").unwrap();
+    vault.add_variable(&env_a.id, "MISSING_2", "m2").unwrap();
+    vault.add_variable(&env_b.id, "SHARED", "b-value").unwrap();
+
+    let snapshots_before = vault.list_snapshots(&env_b.id).unwrap().len();
+    let count = vault.copy_missing_to_env(&env_a.id, &env_b.id).unwrap();
+    assert_eq!(count, 2);
+
+    let mut b_vars = vault.list_variables(&env_b.id).unwrap();
+    b_vars.sort_by(|x, y| x.key.cmp(&y.key));
+    assert_eq!(b_vars.len(), 3);
+    // the pre-existing key's value was left alone
+    assert_eq!(b_vars.iter().find(|v| v.key == "SHARED").unwrap().value, "b-value");
+    assert_eq!(b_vars.iter().find(|v| v.key == "MISSING_1").unwrap().value, "m1");
+    assert_eq!(b_vars.iter().find(|v| v.key == "MISSING_2").unwrap().value, "m2");
+
+    // one snapshot for the whole bulk copy, not one per variable
+    let snapshots_after = vault.list_snapshots(&env_b.id).unwrap().len();
+    assert_eq!(snapshots_after, snapshots_before + 1);
+
+    // running again is a no-op: nothing left missing
+    assert_eq!(vault.copy_missing_to_env(&env_a.id, &env_b.id).unwrap(), 0);
+    assert_eq!(vault.list_snapshots(&env_b.id).unwrap().len(), snapshots_after);
+}
+
+#[test]
+fn unlinked_identical_pairs_finds_matches_but_skips_linked_ones() {
+    let dir = temp_dir();
+    let vault = Vault::create_in(dir.path(), "pw").unwrap();
+    let repo = vault.create_repo("r").unwrap();
+    let env_a = vault.create_environment(&repo.id, "local").unwrap();
+    let env_b = vault.create_environment(&repo.id, "staging").unwrap();
+
+    // identical key+value, not linked: should be flagged
+    vault.add_variable(&env_a.id, "SECRET", "shared-value").unwrap();
+    vault.add_variable(&env_b.id, "SECRET", "shared-value").unwrap();
+    // identical key, different value: should not be flagged
+    vault.add_variable(&env_a.id, "DIFFERS", "x").unwrap();
+    vault.add_variable(&env_b.id, "DIFFERS", "y").unwrap();
+    // already linked: should not be flagged even though identical
+    let linked_a = vault.add_variable(&env_a.id, "ALREADY_LINKED", "z").unwrap();
+    let linked_b = vault.add_variable(&env_b.id, "ALREADY_LINKED", "z").unwrap();
+    vault
+        .link_variables(&[linked_a.id.clone(), linked_b.id.clone()])
+        .unwrap();
+
+    let matches = vault.unlinked_identical_pairs(&env_a.id, &env_b.id).unwrap();
+    assert_eq!(matches.len(), 1);
+    assert_eq!(matches[0].key, "SECRET");
+}
+
 #[test]
 fn a_truncated_or_tampered_vault_file_fails_cleanly() {
     let dir = temp_dir();

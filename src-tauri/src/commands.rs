@@ -3,8 +3,8 @@ use tauri::State;
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use vault_core::backup::BackupInfo;
 use vault_core::models::{
-    DiffRow, Environment, GroupMember, Member, Repo, RepoSummary, SearchResult, Snapshot,
-    SnapshotWithStats, Variable, VariableWithUsage,
+    DiffRow, Environment, GroupMember, Member, ProjectInfo, Repo, RepoSummary, SearchResult,
+    Snapshot, SnapshotWithStats, UnlinkedMatch, Variable, VariableWithUsage,
 };
 use vault_core::Vault;
 
@@ -246,6 +246,16 @@ pub fn delete_environment(id: String, state: State<AppState>) -> Result<(), Stri
     state::with_vault(&state, |v| v.delete_environment(&id))
 }
 
+#[tauri::command]
+pub fn duplicate_environment(
+    env_id: String,
+    new_name: String,
+    copy_values: bool,
+    state: State<AppState>,
+) -> Result<Environment, String> {
+    state::with_vault(&state, |v| v.duplicate_environment(&env_id, &new_name, copy_values))
+}
+
 // ---------------------------------------------------------------------
 // Variables
 // ---------------------------------------------------------------------
@@ -291,6 +301,32 @@ pub fn delete_variable(var_id: String, state: State<AppState>) -> Result<(), Str
     state::with_vault(&state, |v| v.delete_variable(&var_id))
 }
 
+#[tauri::command]
+pub fn delete_variables(var_ids: Vec<String>, state: State<AppState>) -> Result<(), String> {
+    state::with_vault(&state, |v| v.delete_variables(&var_ids))
+}
+
+#[tauri::command]
+pub fn move_variables(
+    var_ids: Vec<String>,
+    target_env_id: String,
+    state: State<AppState>,
+) -> Result<(), String> {
+    state::with_vault(&state, |v| v.move_variables(&var_ids, &target_env_id))
+}
+
+#[tauri::command]
+pub fn set_variable_metadata(
+    var_id: String,
+    description: Option<String>,
+    required: bool,
+    state: State<AppState>,
+) -> Result<(), String> {
+    state::with_vault(&state, |v| {
+        v.set_variable_metadata(&var_id, description.as_deref(), required)
+    })
+}
+
 // ---------------------------------------------------------------------
 // Linked groups
 // ---------------------------------------------------------------------
@@ -323,6 +359,47 @@ pub fn linked_group_count(state: State<AppState>) -> Result<i64, String> {
 #[tauri::command]
 pub fn search(query: String, state: State<AppState>) -> Result<Vec<SearchResult>, String> {
     state::with_vault(&state, |v| v.search(&query))
+}
+
+// ---------------------------------------------------------------------
+// Environment diff and sync
+// ---------------------------------------------------------------------
+
+#[tauri::command]
+pub fn diff_environments(
+    env_a: String,
+    env_b: String,
+    state: State<AppState>,
+) -> Result<Vec<DiffRow>, String> {
+    state::with_vault(&state, |v| v.diff_environments(&env_a, &env_b))
+}
+
+#[tauri::command]
+pub fn copy_key_to_env(
+    source_env_id: String,
+    target_env_id: String,
+    key: String,
+    state: State<AppState>,
+) -> Result<(), String> {
+    state::with_vault(&state, |v| v.copy_key_to_env(&source_env_id, &target_env_id, &key))
+}
+
+#[tauri::command]
+pub fn copy_missing_to_env(
+    source_env_id: String,
+    target_env_id: String,
+    state: State<AppState>,
+) -> Result<usize, String> {
+    state::with_vault(&state, |v| v.copy_missing_to_env(&source_env_id, &target_env_id))
+}
+
+#[tauri::command]
+pub fn unlinked_identical_pairs(
+    env_a: String,
+    env_b: String,
+    state: State<AppState>,
+) -> Result<Vec<UnlinkedMatch>, String> {
+    state::with_vault(&state, |v| v.unlinked_identical_pairs(&env_a, &env_b))
 }
 
 // ---------------------------------------------------------------------
@@ -420,6 +497,43 @@ pub fn get_meta(key: String, state: State<AppState>) -> Result<Option<String>, S
 #[tauri::command]
 pub fn set_meta(key: String, value: String, state: State<AppState>) -> Result<(), String> {
     state::with_vault(&state, |v| v.set_meta(&key, &value))
+}
+
+// ---------------------------------------------------------------------
+// Project auto-detection: directories linked to a repo/environment
+// ---------------------------------------------------------------------
+
+#[tauri::command]
+pub fn link_project(path: String, env_id: String, state: State<AppState>) -> Result<(), String> {
+    state::with_vault(&state, |v| {
+        v.link_project(std::path::Path::new(&path), &env_id).map(|_| ())
+    })
+}
+
+#[tauri::command]
+pub fn unlink_project(path: String, state: State<AppState>) -> Result<(), String> {
+    state::with_vault(&state, |v| v.unlink_project(std::path::Path::new(&path)))
+}
+
+#[tauri::command]
+pub fn list_projects(state: State<AppState>) -> Result<Vec<ProjectInfo>, String> {
+    state::with_vault(&state, |v| v.list_projects())
+}
+
+// ---------------------------------------------------------------------
+// Secret generator
+// ---------------------------------------------------------------------
+
+#[tauri::command]
+pub fn generate_secret(kind: String, length: usize) -> Result<String, String> {
+    let kind = match kind.as_str() {
+        "hex" => vault_core::crypto::SecretKind::Hex,
+        "base64" => vault_core::crypto::SecretKind::Base64Url,
+        "alnum" => vault_core::crypto::SecretKind::Alphanumeric,
+        "words" => vault_core::crypto::SecretKind::Passphrase,
+        other => return Err(format!("unknown secret kind '{other}'")),
+    };
+    vault_core::crypto::generate_secret(kind, length).map_err(stringify)
 }
 
 // ---------------------------------------------------------------------

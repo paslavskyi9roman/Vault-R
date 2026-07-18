@@ -6,11 +6,13 @@ import { TopBar } from './components/TopBar';
 import { Sidebar } from './components/Sidebar';
 import { MainPanel } from './components/MainPanel';
 import { HistorySlideover } from './components/HistorySlideover';
+import { CompareView } from './components/CompareView';
 import { ShareModal } from './components/ShareModal';
 import { ImportModal } from './components/ImportModal';
 import { CommandPalette } from './components/CommandPalette';
 import { LinkModal } from './components/LinkModal';
 import { GroupPopover } from './components/GroupPopover';
+import { GeneratorPopover } from './components/GeneratorPopover';
 import { Onboarding } from './components/Onboarding';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import { Toast } from './components/Toast';
@@ -106,11 +108,13 @@ function App() {
       </div>
 
       <HistorySlideover />
+      <CompareView />
       <ShareModal />
       <ImportModal />
       <CommandPalette />
       <LinkModal />
       <GroupPopover />
+      <GeneratorPopover />
       <Onboarding />
       <SettingsModal />
       <ConfirmDialog />

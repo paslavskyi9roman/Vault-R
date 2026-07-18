@@ -4,17 +4,31 @@ import {
   api,
   type BackupInfo,
   type DiffRow,
+  type GeneratorKind,
   type GroupMember,
   type Member,
+  type ProjectInfo,
   type RepoSummary,
   type SearchResult,
   type SnapshotWithStats,
+  type UnlinkedMatch,
   type VariableWithUsage,
 } from '../lib/api';
 import { isProtectedEnv } from '../lib/envColor';
 
 export const DEFAULT_AUTO_LOCK_MINUTES = 15;
 const AUTO_LOCK_META_KEY = 'auto_lock_minutes';
+
+/// Where a generated secret goes when the user clicks "Generate": the
+/// still-unsaved add-row, or an existing variable (which commits immediately).
+export type GeneratorTarget = { type: 'add' } | { type: 'row'; varId: string };
+
+const GENERATOR_DEFAULT_LENGTH: Record<GeneratorKind, number> = {
+  hex: 32,
+  base64: 32,
+  alnum: 24,
+  words: 5,
+};
 
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -47,6 +61,10 @@ interface VaultState {
   revealed: Record<string, boolean>;
   varSearch: string;
   linkedGroupCount: number;
+  projects: ProjectInfo[];
+  expandedVarId: string | null;
+  selectedVarIds: Record<string, boolean>;
+  bulkMoveTargetId: string | null;
 
   // ---- inline add forms ----
   addingRepo: boolean;
@@ -60,6 +78,12 @@ interface VaultState {
   renamingRepoId: string | null;
   renamingEnvId: string | null;
   renameDraft: string;
+
+  // ---- inline duplicate environment (sidebar) ----
+  duplicatingEnvId: string | null;
+  duplicateNewName: string;
+  duplicateCopyValues: boolean;
+  duplicateBusy: boolean;
 
   // ---- confirmation dialog ----
   confirm: ConfirmRequest | null;
@@ -121,6 +145,21 @@ interface VaultState {
   groupPopoverGroupId: string | null;
   groupPopoverMembers: GroupMember[];
 
+  // ---- secret generator popover ----
+  generatorOpen: boolean;
+  generatorTarget: GeneratorTarget | null;
+  generatorKind: GeneratorKind;
+  generatorLength: number;
+  generatorBusy: boolean;
+
+  // ---- environment compare view ----
+  compareOpen: boolean;
+  compareEnvBId: string | null;
+  compareRows: DiffRow[];
+  compareRevealed: Record<string, boolean>;
+  compareUnlinkedMatches: UnlinkedMatch[];
+  compareBusy: boolean;
+
   // ---- onboarding ----
   onboarding: boolean;
   onboardingStep: number;
@@ -138,6 +177,9 @@ interface VaultState {
 
   refreshRepos: () => Promise<void>;
   refreshVariables: () => Promise<void>;
+  loadProjects: () => Promise<void>;
+  linkCurrentEnvToFolder: () => Promise<void>;
+  unlinkProjectPath: (path: string) => Promise<void>;
   selectEnv: (repoId: string, envId: string | null) => Promise<void>;
   toggleExpandRepo: (repoId: string) => void;
 
@@ -157,6 +199,12 @@ interface VaultState {
   requestDeleteRepo: (repoId: string, name: string) => void;
   requestDeleteEnv: (envId: string, repoName: string, envName: string) => void;
 
+  startDuplicateEnv: (envId: string, currentName: string) => void;
+  cancelDuplicateEnv: () => void;
+  setDuplicateNewName: (v: string) => void;
+  toggleDuplicateCopyValues: () => void;
+  submitDuplicateEnv: () => Promise<void>;
+
   requestConfirm: (req: ConfirmRequest) => void;
   setConfirmInput: (v: string) => void;
   cancelConfirm: () => void;
@@ -169,7 +217,16 @@ interface VaultState {
   commitVariableValue: (varId: string, newValue: string) => Promise<void>;
   commitVariableKey: (varId: string, newKey: string) => Promise<void>;
   deleteVariable: (varId: string, key: string) => Promise<void>;
+  toggleVarExpand: (varId: string) => void;
+  commitVariableMetadata: (varId: string, description: string, required: boolean) => Promise<void>;
   toggleReveal: (varId: string) => void;
+
+  toggleVarSelected: (varId: string) => void;
+  clearVarSelection: () => void;
+  bulkDeleteSelected: () => Promise<void>;
+  bulkCopySelectedAsEnvBlock: () => Promise<void>;
+  setBulkMoveTarget: (envId: string) => void;
+  bulkMoveSelected: () => Promise<void>;
   copyVariable: (value: string, key: string) => Promise<void>;
   copyPlainText: (text: string, label: string) => Promise<void>;
 
@@ -222,6 +279,21 @@ interface VaultState {
   closeGroupPopover: () => void;
   unlinkFromPopover: (varId: string) => Promise<void>;
 
+  openGenerator: (target: GeneratorTarget) => void;
+  closeGenerator: () => void;
+  setGeneratorKind: (kind: GeneratorKind) => void;
+  setGeneratorLength: (length: number) => void;
+  runGenerator: () => Promise<void>;
+
+  openCompare: () => void;
+  closeCompare: () => void;
+  setCompareEnvB: (envId: string) => Promise<void>;
+  refreshCompare: () => Promise<void>;
+  toggleCompareReveal: (key: string) => void;
+  copyCompareRow: (key: string, direction: 'aToB' | 'bToA') => Promise<void>;
+  copyAllMissing: (direction: 'aToB' | 'bToA') => Promise<void>;
+  linkCompareMatch: (match: UnlinkedMatch) => Promise<void>;
+
   obNext: () => void;
   obSkip: () => Promise<void>;
   setOnboardingRepoName: (v: string) => void;
@@ -249,6 +321,10 @@ export const useVaultStore = create<VaultState>((set, get) => ({
   revealed: {},
   varSearch: '',
   linkedGroupCount: 0,
+  projects: [],
+  expandedVarId: null,
+  selectedVarIds: {},
+  bulkMoveTargetId: null,
 
   addingRepo: false,
   newRepoName: '',
@@ -260,6 +336,11 @@ export const useVaultStore = create<VaultState>((set, get) => ({
   renamingRepoId: null,
   renamingEnvId: null,
   renameDraft: '',
+
+  duplicatingEnvId: null,
+  duplicateNewName: '',
+  duplicateCopyValues: false,
+  duplicateBusy: false,
 
   confirm: null,
   confirmInput: '',
@@ -307,6 +388,19 @@ export const useVaultStore = create<VaultState>((set, get) => ({
   linkSelected: {},
   groupPopoverGroupId: null,
   groupPopoverMembers: [],
+
+  generatorOpen: false,
+  generatorTarget: null,
+  generatorKind: 'hex',
+  generatorLength: GENERATOR_DEFAULT_LENGTH.hex,
+  generatorBusy: false,
+
+  compareOpen: false,
+  compareEnvBId: null,
+  compareRows: [],
+  compareRevealed: {},
+  compareUnlinkedMatches: [],
+  compareBusy: false,
 
   onboarding: false,
   onboardingStep: 0,
@@ -359,6 +453,7 @@ export const useVaultStore = create<VaultState>((set, get) => ({
       locked: true,
       repos: [],
       variables: [],
+      projects: [],
       activeRepoId: null,
       activeEnvId: null,
       revealed: {},
@@ -407,8 +502,47 @@ export const useVaultStore = create<VaultState>((set, get) => ({
     set({ variables });
   },
 
+  loadProjects: async () => {
+    try {
+      const projects = await api.listProjects();
+      set({ projects });
+    } catch (e) {
+      get().showToast(String(e));
+    }
+  },
+  linkCurrentEnvToFolder: async () => {
+    const envId = get().activeEnvId;
+    if (!envId) return;
+    try {
+      const picked = await open({ directory: true, multiple: false });
+      const path = typeof picked === 'string' ? picked : null;
+      if (!path) return;
+      await api.linkProject(path, envId);
+      await get().loadProjects();
+      get().showToast('Linked folder');
+    } catch (e) {
+      get().showToast(String(e));
+    }
+  },
+  unlinkProjectPath: async (path) => {
+    try {
+      await api.unlinkProject(path);
+      await get().loadProjects();
+      get().showToast('Unlinked folder');
+    } catch (e) {
+      get().showToast(String(e));
+    }
+  },
+
   selectEnv: async (repoId, envId) => {
-    set({ activeRepoId: repoId, activeEnvId: envId, varSearch: '' });
+    set({
+      activeRepoId: repoId,
+      activeEnvId: envId,
+      varSearch: '',
+      expandedVarId: null,
+      selectedVarIds: {},
+      bulkMoveTargetId: null,
+    });
     await get().refreshVariables();
   },
 
@@ -509,6 +643,28 @@ export const useVaultStore = create<VaultState>((set, get) => ({
     });
   },
 
+  startDuplicateEnv: (envId, currentName) =>
+    set({ duplicatingEnvId: envId, duplicateNewName: `${currentName}-copy`, duplicateCopyValues: false }),
+  cancelDuplicateEnv: () => set({ duplicatingEnvId: null, duplicateNewName: '' }),
+  setDuplicateNewName: (v) => set({ duplicateNewName: v }),
+  toggleDuplicateCopyValues: () => set((s) => ({ duplicateCopyValues: !s.duplicateCopyValues })),
+  submitDuplicateEnv: async () => {
+    const { duplicatingEnvId, duplicateNewName, duplicateCopyValues } = get();
+    const name = duplicateNewName.trim();
+    if (!duplicatingEnvId || !name) return;
+    set({ duplicateBusy: true });
+    try {
+      const env = await api.duplicateEnvironment(duplicatingEnvId, name, duplicateCopyValues);
+      set({ duplicatingEnvId: null, duplicateNewName: '', activeEnvId: env.id, activeRepoId: env.repoId });
+      await get().refreshRepos();
+      get().showToast(`Duplicated to ${name}`);
+    } catch (e) {
+      get().showToast(String(e));
+    } finally {
+      set({ duplicateBusy: false });
+    }
+  },
+
   requestConfirm: (req) => set({ confirm: req, confirmInput: '', confirmBusy: false }),
   setConfirmInput: (v) => set({ confirmInput: v }),
   cancelConfirm: () => set({ confirm: null, confirmInput: '', confirmBusy: false }),
@@ -594,6 +750,82 @@ export const useVaultStore = create<VaultState>((set, get) => ({
       return;
     }
     await remove();
+  },
+
+  toggleVarExpand: (varId) =>
+    set((s) => ({ expandedVarId: s.expandedVarId === varId ? null : varId })),
+  commitVariableMetadata: async (varId, description, required) => {
+    try {
+      await api.setVariableMetadata(varId, description.trim() ? description : null, required);
+      await get().refreshVariables();
+    } catch (e) {
+      get().showToast(String(e));
+    }
+  },
+
+  toggleVarSelected: (varId) =>
+    set((s) => ({ selectedVarIds: { ...s.selectedVarIds, [varId]: !s.selectedVarIds[varId] } })),
+  clearVarSelection: () => set({ selectedVarIds: {}, bulkMoveTargetId: null }),
+
+  bulkDeleteSelected: async () => {
+    const ids = Object.entries(get().selectedVarIds).filter(([, v]) => v).map(([id]) => id);
+    if (ids.length === 0) return;
+    const count = ids.length;
+    const remove = async () => {
+      try {
+        await api.deleteVariables(ids);
+        get().clearVarSelection();
+        await get().refreshRepos();
+        get().showToast(`Deleted ${count} variable${count === 1 ? '' : 's'}`);
+      } catch (e) {
+        get().showToast(String(e));
+      }
+    };
+
+    const env = activeEnv(get());
+    if (env && isProtectedEnv(env.name)) {
+      get().requestConfirm({
+        title: `Delete ${count} variable${count === 1 ? '' : 's'} from ${env.name}?`,
+        message: `${env.name} holds live credentials. Anything reading these variables in production will stop finding them. You can restore them from history afterwards.`,
+        confirmLabel: 'Delete variables',
+        danger: true,
+        onConfirm: remove,
+      });
+      return;
+    }
+    await remove();
+  },
+
+  bulkCopySelectedAsEnvBlock: async () => {
+    const ids = Object.entries(get().selectedVarIds).filter(([, v]) => v).map(([id]) => id);
+    const vars = get().variables.filter((v) => ids.includes(v.id));
+    if (vars.length === 0) return;
+    const text = vars.map((v) => `${v.key}=${v.value}`).join('\n');
+    const doCopy = async () => {
+      try {
+        await api.copySecretToClipboard(text);
+        get().showToast(`Copied ${vars.length} variable${vars.length === 1 ? '' : 's'} — clipboard clears in 30s`);
+      } catch (e) {
+        get().showToast(String(e));
+      }
+    };
+    withProtectedEnvAck(get, set, 'copy live secrets to the clipboard', () => void doCopy());
+  },
+
+  setBulkMoveTarget: (envId) => set({ bulkMoveTargetId: envId }),
+  bulkMoveSelected: async () => {
+    const { bulkMoveTargetId } = get();
+    const ids = Object.entries(get().selectedVarIds).filter(([, v]) => v).map(([id]) => id);
+    if (ids.length === 0 || !bulkMoveTargetId) return;
+    const count = ids.length;
+    try {
+      await api.moveVariables(ids, bulkMoveTargetId);
+      get().clearVarSelection();
+      await get().refreshRepos();
+      get().showToast(`Moved ${count} variable${count === 1 ? '' : 's'}`);
+    } catch (e) {
+      get().showToast(String(e));
+    }
   },
 
   toggleReveal: (varId) => {
@@ -1066,6 +1298,120 @@ export const useVaultStore = create<VaultState>((set, get) => ({
     }
   },
 
+  openGenerator: (target) =>
+    set({
+      generatorOpen: true,
+      generatorTarget: target,
+      generatorKind: 'hex',
+      generatorLength: GENERATOR_DEFAULT_LENGTH.hex,
+    }),
+  closeGenerator: () => set({ generatorOpen: false, generatorTarget: null }),
+  setGeneratorKind: (kind) => set({ generatorKind: kind, generatorLength: GENERATOR_DEFAULT_LENGTH[kind] }),
+  setGeneratorLength: (length) => set({ generatorLength: length }),
+  runGenerator: async () => {
+    const { generatorKind, generatorLength, generatorTarget } = get();
+    if (!generatorTarget) return;
+    set({ generatorBusy: true });
+    try {
+      const secret = await api.generateSecret(generatorKind, generatorLength);
+      if (generatorTarget.type === 'add') {
+        set({ newVarValue: secret });
+      } else {
+        // An existing row has no separate "save" step, so generating for one
+        // commits immediately -- and reveals it, since you cannot see what
+        // you just generated otherwise.
+        await api.updateVariableValue(generatorTarget.varId, secret);
+        set((s) => ({ revealed: { ...s.revealed, [generatorTarget.varId]: true } }));
+        await get().refreshRepos();
+      }
+      set({ generatorOpen: false, generatorTarget: null });
+      get().showToast('Generated a new secret');
+    } catch (e) {
+      get().showToast(String(e));
+    } finally {
+      set({ generatorBusy: false });
+    }
+  },
+
+  openCompare: () => set({ compareOpen: true, compareEnvBId: null, compareRows: [], compareRevealed: {}, compareUnlinkedMatches: [] }),
+  closeCompare: () => set({ compareOpen: false }),
+  setCompareEnvB: async (envId) => {
+    set({ compareEnvBId: envId, compareRevealed: {} });
+    await get().refreshCompare();
+  },
+  refreshCompare: async () => {
+    const { activeEnvId, compareEnvBId } = get();
+    if (!activeEnvId || !compareEnvBId) {
+      set({ compareRows: [], compareUnlinkedMatches: [] });
+      return;
+    }
+    set({ compareBusy: true });
+    try {
+      const [compareRows, compareUnlinkedMatches] = await Promise.all([
+        api.diffEnvironments(activeEnvId, compareEnvBId),
+        api.unlinkedIdenticalPairs(activeEnvId, compareEnvBId),
+      ]);
+      set({ compareRows, compareUnlinkedMatches });
+    } catch (e) {
+      get().showToast(String(e));
+    } finally {
+      set({ compareBusy: false });
+    }
+  },
+  toggleCompareReveal: (key) => {
+    const alreadyRevealed = !!get().compareRevealed[key];
+    const doToggle = () =>
+      set((s) => ({ compareRevealed: { ...s.compareRevealed, [key]: !s.compareRevealed[key] } }));
+    if (alreadyRevealed) {
+      doToggle();
+      return;
+    }
+    const { activeEnvId, compareEnvBId } = get();
+    withMultiEnvProtectedAck(
+      get,
+      set,
+      [activeEnvId, compareEnvBId],
+      'reveal live secrets in the compare view',
+      doToggle,
+    );
+  },
+  copyCompareRow: async (key, direction) => {
+    const { activeEnvId, compareEnvBId } = get();
+    if (!activeEnvId || !compareEnvBId) return;
+    const [source, target] = direction === 'aToB' ? [activeEnvId, compareEnvBId] : [compareEnvBId, activeEnvId];
+    try {
+      await api.copyKeyToEnv(source, target, key);
+      await get().refreshCompare();
+      await get().refreshRepos();
+      get().showToast(`Copied ${key}`);
+    } catch (e) {
+      get().showToast(String(e));
+    }
+  },
+  copyAllMissing: async (direction) => {
+    const { activeEnvId, compareEnvBId } = get();
+    if (!activeEnvId || !compareEnvBId) return;
+    const [source, target] = direction === 'aToB' ? [activeEnvId, compareEnvBId] : [compareEnvBId, activeEnvId];
+    try {
+      const count = await api.copyMissingToEnv(source, target);
+      await get().refreshCompare();
+      await get().refreshRepos();
+      get().showToast(`Copied ${count} missing variable${count === 1 ? '' : 's'}`);
+    } catch (e) {
+      get().showToast(String(e));
+    }
+  },
+  linkCompareMatch: async (match) => {
+    try {
+      await api.linkVariables([match.varA.id, match.varB.id]);
+      await get().refreshCompare();
+      await get().refreshRepos();
+      get().showToast(`Linked ${match.key}`);
+    } catch (e) {
+      get().showToast(String(e));
+    }
+  },
+
   obNext: () => set((s) => ({ onboardingStep: s.onboardingStep + 1 })),
   obSkip: async () => {
     await get().obFinish();
@@ -1110,6 +1456,9 @@ export const useVaultStore = create<VaultState>((set, get) => ({
       historyOpen: false,
       linkModalOpen: false,
       groupPopoverGroupId: null,
+      generatorOpen: false,
+      generatorTarget: null,
+      compareOpen: false,
       settingsOpen: false,
       // never yank a confirmation out from under an action that is mid-flight
       confirm: s.confirmBusy ? s.confirm : null,
@@ -1119,6 +1468,7 @@ export const useVaultStore = create<VaultState>((set, get) => ({
 
 async function afterUnlock(get: () => VaultState) {
   await get().refreshRepos();
+  await get().loadProjects();
   const [onboardingDone, autoLock, needsMigration] = await Promise.all([
     api.getMeta('onboarding_done'),
     api.getMeta(AUTO_LOCK_META_KEY),
@@ -1141,6 +1491,14 @@ function activeEnv(state: VaultState) {
   return state.repos
     .find((r) => r.id === state.activeRepoId)
     ?.envs.find((e) => e.id === state.activeEnvId);
+}
+
+function findEnvById(state: VaultState, envId: string) {
+  for (const repo of state.repos) {
+    const env = repo.envs.find((e) => e.id === envId);
+    if (env) return env;
+  }
+  return undefined;
 }
 
 /// Runs `action`, but for a production-like environment asks once per session
@@ -1166,6 +1524,45 @@ function withProtectedEnvAck(
     danger: true,
     onConfirm: () => {
       set({ protectedAcknowledged: { ...get().protectedAcknowledged, [env.id]: true } });
+      action();
+    },
+  });
+}
+
+/// As [`withProtectedEnvAck`], but for actions (like the compare view's
+/// reveal toggle) that can touch more than one environment's secrets at
+/// once -- any of `envIds` that is protected and not yet acknowledged this
+/// session triggers one combined confirmation.
+function withMultiEnvProtectedAck(
+  get: () => VaultState,
+  set: (partial: Partial<VaultState>) => void,
+  envIds: (string | null | undefined)[],
+  what: string,
+  action: () => void,
+) {
+  const state = get();
+  const pending = envIds
+    .filter((id): id is string => !!id)
+    .map((id) => ({ id, env: findEnvById(state, id) }))
+    .filter((p): p is { id: string; env: NonNullable<typeof p.env> } => !!p.env)
+    .filter((p) => isProtectedEnv(p.env.name) && !state.protectedAcknowledged[p.id]);
+
+  if (pending.length === 0) {
+    action();
+    return;
+  }
+  const names = pending.map((p) => p.env.name).join(' and ');
+  state.requestConfirm({
+    title: `Show ${names} secrets?`,
+    message: `You are about to ${what}. These are live credentials — make sure nobody is looking over your shoulder or sharing your screen. Vault-R will not ask again until you lock it.`,
+    confirmLabel: 'Show secrets',
+    danger: true,
+    onConfirm: () => {
+      const patch: Record<string, boolean> = {};
+      pending.forEach((p) => {
+        patch[p.id] = true;
+      });
+      set({ protectedAcknowledged: { ...get().protectedAcknowledged, ...patch } });
       action();
     },
   });

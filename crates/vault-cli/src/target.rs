@@ -44,6 +44,32 @@ pub fn resolve_env(vault: &Vault, target: &str, create: bool) -> Result<(Repo, E
     Ok((repo, env))
 }
 
+/// Resolves an optional `<repo>/<env>` CLI target: if given, resolves it
+/// normally (optionally creating). If omitted, resolves the linked project
+/// for the current directory, per `vault link`.
+pub fn resolve_target_or_cwd(
+    vault: &Vault,
+    target: Option<&str>,
+    create: bool,
+) -> Result<(Repo, Environment)> {
+    match target {
+        Some(t) => resolve_env(vault, t, create),
+        None => resolve_cwd(vault),
+    }
+}
+
+/// Resolves the linked project for the current directory (or the nearest
+/// linked ancestor). Fails with an actionable message if nothing here was
+/// ever linked with `vault link`.
+pub fn resolve_cwd(vault: &Vault) -> Result<(Repo, Environment)> {
+    let cwd = std::env::current_dir()?;
+    vault.resolve_project(&cwd)?.ok_or_else(|| {
+        VaultError::InvalidInput(
+            "no linked project here — run 'vault link <repo>/<env>' in this directory".into(),
+        )
+    })
+}
+
 /// Resolves a target that names either a whole repo (`api-gateway`) or one of
 /// its environments (`api-gateway/local`).
 pub fn resolve_repo_or_env(

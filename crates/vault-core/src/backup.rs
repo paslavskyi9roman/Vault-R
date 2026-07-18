@@ -108,6 +108,22 @@ impl Vault {
     }
 }
 
+/// Writes `bytes` (a raw vault file image) into `vault_dir`'s `backups/`
+/// directory and prunes down to [`MAX_AUTOMATIC_BACKUPS`]. Used by the schema
+/// migration path, which must preserve the file exactly as it was *before* a
+/// migration ran: by the time a [`Vault`] exists to call
+/// [`Vault::rotate_backup`] on, the in-memory database has already been
+/// migrated, so persisting it first (as `rotate_backup` does) would overwrite
+/// the pre-migration file this is meant to save.
+pub(crate) fn backup_raw_bytes(vault_dir: &Path, bytes: &[u8]) -> Result<PathBuf> {
+    let dir = vault_dir.join("backups");
+    fs::create_dir_all(&dir)?;
+    let dest = dir.join(timestamp_name());
+    fs::write(&dest, bytes)?;
+    prune_backups(&dir, MAX_AUTOMATIC_BACKUPS)?;
+    Ok(dest)
+}
+
 pub fn list_backups_in(dir: &Path) -> Result<Vec<BackupInfo>> {
     if !dir.exists() {
         return Ok(Vec::new());

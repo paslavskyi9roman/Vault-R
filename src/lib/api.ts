@@ -32,6 +32,8 @@ export interface Variable {
   key: string;
   value: string;
   groupId: string | null;
+  description: string | null;
+  required: boolean;
 }
 
 export interface VariableWithUsage extends Variable {
@@ -85,6 +87,21 @@ export interface BackupInfo {
   bytes: number;
 }
 
+export interface UnlinkedMatch {
+  key: string;
+  varA: Variable;
+  varB: Variable;
+}
+
+export interface ProjectInfo {
+  id: string;
+  path: string;
+  envId: string;
+  repoName: string;
+  envName: string;
+  createdAt: string;
+}
+
 export const api = {
   vaultExists: () => invoke<boolean>('vault_exists'),
   vaultTryKeychain: () => invoke<boolean>('vault_try_keychain'),
@@ -116,6 +133,8 @@ export const api = {
   renameEnvironment: (id: string, newName: string) =>
     invoke<void>('rename_environment', { id, newName }),
   deleteEnvironment: (id: string) => invoke<void>('delete_environment', { id }),
+  duplicateEnvironment: (envId: string, newName: string, copyValues: boolean) =>
+    invoke<Environment>('duplicate_environment', { envId, newName, copyValues }),
 
   listVariablesWithUsage: (envId: string) =>
     invoke<VariableWithUsage[]>('list_variables_with_usage', { envId }),
@@ -126,6 +145,11 @@ export const api = {
   renameVariableKey: (varId: string, newKey: string) =>
     invoke<void>('rename_variable_key', { varId, newKey }),
   deleteVariable: (varId: string) => invoke<void>('delete_variable', { varId }),
+  setVariableMetadata: (varId: string, description: string | null, required: boolean) =>
+    invoke<void>('set_variable_metadata', { varId, description, required }),
+  deleteVariables: (varIds: string[]) => invoke<void>('delete_variables', { varIds }),
+  moveVariables: (varIds: string[], targetEnvId: string) =>
+    invoke<void>('move_variables', { varIds, targetEnvId }),
 
   linkCandidates: (varId: string) => invoke<GroupMember[]>('link_candidates', { varId }),
   linkVariables: (varIds: string[]) => invoke<string>('link_variables', { varIds }),
@@ -134,6 +158,19 @@ export const api = {
   linkedGroupCount: () => invoke<number>('linked_group_count'),
 
   search: (query: string) => invoke<SearchResult[]>('search', { query }),
+
+  diffEnvironments: (envA: string, envB: string) =>
+    invoke<DiffRow[]>('diff_environments', { envA, envB }),
+  copyKeyToEnv: (sourceEnvId: string, targetEnvId: string, key: string) =>
+    invoke<void>('copy_key_to_env', { sourceEnvId, targetEnvId, key }),
+  copyMissingToEnv: (sourceEnvId: string, targetEnvId: string) =>
+    invoke<number>('copy_missing_to_env', { sourceEnvId, targetEnvId }),
+  unlinkedIdenticalPairs: (envA: string, envB: string) =>
+    invoke<UnlinkedMatch[]>('unlinked_identical_pairs', { envA, envB }),
+
+  linkProject: (path: string, envId: string) => invoke<void>('link_project', { path, envId }),
+  unlinkProject: (path: string) => invoke<void>('unlink_project', { path }),
+  listProjects: () => invoke<ProjectInfo[]>('list_projects'),
 
   importEnvText: (envId: string, text: string) => invoke<number>('import_env_text', { envId, text }),
   exportEnvText: (envId: string) => invoke<string>('export_env_text', { envId }),
@@ -157,4 +194,9 @@ export const api = {
   setMeta: (key: string, value: string) => invoke<void>('set_meta', { key, value }),
 
   copySecretToClipboard: (text: string) => invoke<void>('copy_secret_to_clipboard', { text }),
+
+  generateSecret: (kind: GeneratorKind, length: number) =>
+    invoke<string>('generate_secret', { kind, length }),
 };
+
+export type GeneratorKind = 'hex' | 'base64' | 'alnum' | 'words';
