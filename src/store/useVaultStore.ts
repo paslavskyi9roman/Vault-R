@@ -1,16 +1,34 @@
 import { create } from 'zustand';
-import { save } from '@tauri-apps/plugin-dialog';
+import { open, save } from '@tauri-apps/plugin-dialog';
 import {
   api,
+  type BackupInfo,
+  type DiffRow,
   type GroupMember,
   type Member,
   type RepoSummary,
   type SearchResult,
-  type Snapshot,
+  type SnapshotWithStats,
   type VariableWithUsage,
 } from '../lib/api';
+import { isProtectedEnv } from '../lib/envColor';
+
+export const DEFAULT_AUTO_LOCK_MINUTES = 15;
+const AUTO_LOCK_META_KEY = 'auto_lock_minutes';
 
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
+
+/// A pending destructive action awaiting confirmation. `requireTypedName`, when
+/// set, forces the user to retype that exact string before the action unlocks —
+/// reserved for deletes that cascade (repos, environments).
+export interface ConfirmRequest {
+  title: string;
+  message: string;
+  confirmLabel: string;
+  danger: boolean;
+  requireTypedName?: string;
+  onConfirm: () => Promise<void> | void;
+}
 
 interface VaultState {
   // ---- lifecycle ----
@@ -38,6 +56,16 @@ interface VaultState {
   newVarKey: string;
   newVarValue: string;
 
+  // ---- inline rename (sidebar) ----
+  renamingRepoId: string | null;
+  renamingEnvId: string | null;
+  renameDraft: string;
+
+  // ---- confirmation dialog ----
+  confirm: ConfirmRequest | null;
+  confirmInput: string;
+  confirmBusy: boolean;
+
   // ---- import modal ----
   importOpen: boolean;
   importText: string;
@@ -49,7 +77,35 @@ interface VaultState {
 
   // ---- history slideover ----
   historyOpen: boolean;
-  historySnapshots: Snapshot[];
+  historySnapshots: SnapshotWithStats[];
+  expandedSnapshotId: string | null;
+  snapshotDiff: DiffRow[];
+  diffRevealed: Record<string, boolean>;
+
+  // ---- settings ----
+  settingsOpen: boolean;
+  needsMigration: boolean;
+  hasRecoveryCode: boolean;
+  backups: BackupInfo[];
+  autoLockMinutes: number;
+  pwCurrent: string;
+  pwNew: string;
+  pwConfirm: string;
+  pwBusy: boolean;
+  pwError: string | null;
+  /// Shown exactly once, right after generation — the code is not recoverable.
+  recoveryCodeOnce: string | null;
+
+  // ---- unlock screen: recovery + restore ----
+  recoveryMode: boolean;
+  recoveryCode: string;
+  /// Set after a recovery unlock: the user must choose a new master password
+  /// before they can reach the vault.
+  mustResetPassword: boolean;
+
+  /// Environments whose "these are real secrets" warning has been accepted for
+  /// this unlocked session, keyed by env id.
+  protectedAcknowledged: Record<string, boolean>;
 
   // ---- command palette ----
   cmdkOpen: boolean;
@@ -93,14 +149,29 @@ interface VaultState {
   setNewEnvName: (v: string) => void;
   submitAddEnv: (repoId: string) => Promise<void>;
 
+  startRenameRepo: (repoId: string, currentName: string) => void;
+  startRenameEnv: (envId: string, currentName: string) => void;
+  setRenameDraft: (v: string) => void;
+  cancelRename: () => void;
+  submitRename: () => Promise<void>;
+  requestDeleteRepo: (repoId: string, name: string) => void;
+  requestDeleteEnv: (envId: string, repoName: string, envName: string) => void;
+
+  requestConfirm: (req: ConfirmRequest) => void;
+  setConfirmInput: (v: string) => void;
+  cancelConfirm: () => void;
+  acceptConfirm: () => Promise<void>;
+
   setVarSearch: (v: string) => void;
   setNewVarKey: (v: string) => void;
   setNewVarValue: (v: string) => void;
   addVariable: () => Promise<void>;
   commitVariableValue: (varId: string, newValue: string) => Promise<void>;
+  commitVariableKey: (varId: string, newKey: string) => Promise<void>;
   deleteVariable: (varId: string, key: string) => Promise<void>;
   toggleReveal: (varId: string) => void;
   copyVariable: (value: string, key: string) => Promise<void>;
+  copyPlainText: (text: string, label: string) => Promise<void>;
 
   openImport: () => void;
   closeImport: () => void;
@@ -111,7 +182,26 @@ interface VaultState {
 
   openHistory: () => Promise<void>;
   closeHistory: () => void;
-  restoreSnapshot: (snapshotId: string, timeLabel: string) => Promise<void>;
+  toggleSnapshotDiff: (snapshotId: string) => Promise<void>;
+  toggleDiffReveal: (key: string) => void;
+  requestRestoreSnapshot: (snapshotId: string, timeLabel: string) => Promise<void>;
+  restoreVariableFromSnapshot: (snapshotId: string, key: string) => Promise<void>;
+
+  openSettings: () => Promise<void>;
+  closeSettings: () => void;
+  setPwField: (field: 'pwCurrent' | 'pwNew' | 'pwConfirm', value: string) => void;
+  changePassword: (remember: boolean) => Promise<void>;
+  generateRecoveryCode: () => Promise<void>;
+  dismissRecoveryCode: () => void;
+  saveRecoveryCodeToFile: () => Promise<void>;
+  exportBackup: () => Promise<void>;
+  setAutoLockMinutes: (minutes: number) => Promise<void>;
+
+  setRecoveryMode: (on: boolean) => void;
+  setRecoveryCode: (v: string) => void;
+  unlockWithRecovery: () => Promise<void>;
+  resetPasswordAfterRecovery: (newPassword: string) => Promise<void>;
+  restoreBackupFromUnlock: () => Promise<void>;
 
   openShare: () => Promise<void>;
   closeShare: () => void;
@@ -167,6 +257,14 @@ export const useVaultStore = create<VaultState>((set, get) => ({
   newVarKey: '',
   newVarValue: '',
 
+  renamingRepoId: null,
+  renamingEnvId: null,
+  renameDraft: '',
+
+  confirm: null,
+  confirmInput: '',
+  confirmBusy: false,
+
   importOpen: false,
   importText: '',
 
@@ -176,6 +274,27 @@ export const useVaultStore = create<VaultState>((set, get) => ({
 
   historyOpen: false,
   historySnapshots: [],
+  expandedSnapshotId: null,
+  snapshotDiff: [],
+  diffRevealed: {},
+
+  settingsOpen: false,
+  needsMigration: false,
+  hasRecoveryCode: false,
+  backups: [],
+  autoLockMinutes: DEFAULT_AUTO_LOCK_MINUTES,
+  pwCurrent: '',
+  pwNew: '',
+  pwConfirm: '',
+  pwBusy: false,
+  pwError: null,
+  recoveryCodeOnce: null,
+
+  recoveryMode: false,
+  recoveryCode: '',
+  mustResetPassword: false,
+
+  protectedAcknowledged: {},
 
   cmdkOpen: false,
   cmdkQuery: '',
@@ -243,6 +362,15 @@ export const useVaultStore = create<VaultState>((set, get) => ({
       activeRepoId: null,
       activeEnvId: null,
       revealed: {},
+      // Every session-scoped concession resets: a fresh unlock warns again.
+      protectedAcknowledged: {},
+      settingsOpen: false,
+      historyOpen: false,
+      recoveryCodeOnce: null,
+      confirm: null,
+      pwCurrent: '',
+      pwNew: '',
+      pwConfirm: '',
     });
   },
 
@@ -324,6 +452,81 @@ export const useVaultStore = create<VaultState>((set, get) => ({
     }
   },
 
+  startRenameRepo: (repoId, currentName) =>
+    set({ renamingRepoId: repoId, renamingEnvId: null, renameDraft: currentName }),
+  startRenameEnv: (envId, currentName) =>
+    set({ renamingEnvId: envId, renamingRepoId: null, renameDraft: currentName }),
+  setRenameDraft: (v) => set({ renameDraft: v }),
+  cancelRename: () => set({ renamingRepoId: null, renamingEnvId: null, renameDraft: '' }),
+  submitRename: async () => {
+    const { renamingRepoId, renamingEnvId, renameDraft } = get();
+    const name = renameDraft.trim();
+    if (!name) return;
+    try {
+      if (renamingRepoId) {
+        await api.renameRepo(renamingRepoId, name);
+      } else if (renamingEnvId) {
+        await api.renameEnvironment(renamingEnvId, name);
+      } else {
+        return;
+      }
+      set({ renamingRepoId: null, renamingEnvId: null, renameDraft: '' });
+      await get().refreshRepos();
+      get().showToast(`Renamed to ${name}`);
+    } catch (e) {
+      get().showToast(String(e));
+    }
+  },
+
+  requestDeleteRepo: (repoId, name) => {
+    get().requestConfirm({
+      title: `Delete ${name}?`,
+      message:
+        'This deletes every environment, variable and version-history snapshot under this repository. It cannot be undone.',
+      confirmLabel: 'Delete repository',
+      danger: true,
+      requireTypedName: name,
+      onConfirm: async () => {
+        await api.deleteRepo(repoId);
+        await get().refreshRepos();
+        get().showToast(`Deleted ${name}`);
+      },
+    });
+  },
+
+  requestDeleteEnv: (envId, repoName, envName) => {
+    get().requestConfirm({
+      title: `Delete ${envName}?`,
+      message: `This deletes every variable and version-history snapshot in ${repoName}/${envName}. It cannot be undone.`,
+      confirmLabel: 'Delete environment',
+      danger: true,
+      requireTypedName: envName,
+      onConfirm: async () => {
+        await api.deleteEnvironment(envId);
+        await get().refreshRepos();
+        get().showToast(`Deleted ${envName}`);
+      },
+    });
+  },
+
+  requestConfirm: (req) => set({ confirm: req, confirmInput: '', confirmBusy: false }),
+  setConfirmInput: (v) => set({ confirmInput: v }),
+  cancelConfirm: () => set({ confirm: null, confirmInput: '', confirmBusy: false }),
+  acceptConfirm: async () => {
+    const { confirm, confirmInput, confirmBusy } = get();
+    if (!confirm || confirmBusy) return;
+    if (confirm.requireTypedName && confirmInput.trim() !== confirm.requireTypedName) return;
+    set({ confirmBusy: true });
+    try {
+      await confirm.onConfirm();
+      set({ confirm: null, confirmInput: '' });
+    } catch (e) {
+      get().showToast(String(e));
+    } finally {
+      set({ confirmBusy: false });
+    }
+  },
+
   setVarSearch: (v) => set({ varSearch: v }),
   setNewVarKey: (v) => set({ newVarKey: v }),
   setNewVarValue: (v) => set({ newVarValue: v }),
@@ -350,22 +553,79 @@ export const useVaultStore = create<VaultState>((set, get) => ({
     }
   },
 
-  deleteVariable: async (varId, key) => {
+  commitVariableKey: async (varId, newKey) => {
+    const trimmed = newKey.trim();
+    const current = get().variables.find((v) => v.id === varId);
+    if (!trimmed || !current || trimmed === current.key) {
+      await get().refreshVariables();
+      return;
+    }
     try {
-      await api.deleteVariable(varId);
+      await api.renameVariableKey(varId, trimmed);
       await get().refreshRepos();
-      get().showToast(`Deleted ${key}`);
+      get().showToast(`Renamed to ${trimmed}`);
     } catch (e) {
       get().showToast(String(e));
+      // pull the committed state back so the cell stops showing the rejected key
+      await get().refreshVariables();
     }
   },
 
-  toggleReveal: (varId) => set((s) => ({ revealed: { ...s.revealed, [varId]: !s.revealed[varId] } })),
+  deleteVariable: async (varId, key) => {
+    const remove = async () => {
+      try {
+        await api.deleteVariable(varId);
+        await get().refreshRepos();
+        get().showToast(`Deleted ${key}`);
+      } catch (e) {
+        get().showToast(String(e));
+      }
+    };
+
+    const env = activeEnv(get());
+    if (env && isProtectedEnv(env.name)) {
+      get().requestConfirm({
+        title: `Delete ${key} from ${env.name}?`,
+        message: `${env.name} holds live credentials. Anything reading this variable in production will stop finding it. You can restore it from history afterwards.`,
+        confirmLabel: 'Delete variable',
+        danger: true,
+        onConfirm: remove,
+      });
+      return;
+    }
+    await remove();
+  },
+
+  toggleReveal: (varId) => {
+    const alreadyRevealed = !!get().revealed[varId];
+    const doToggle = () =>
+      set((s) => ({ revealed: { ...s.revealed, [varId]: !s.revealed[varId] } }));
+    // Hiding a value never needs a warning; only exposing one does.
+    if (alreadyRevealed) {
+      doToggle();
+      return;
+    }
+    withProtectedEnvAck(get, set, 'reveal a live secret', doToggle);
+  },
 
   copyVariable: async (value, key) => {
+    const doCopy = async () => {
+      try {
+        await api.copySecretToClipboard(value);
+        get().showToast(`Copied ${key} — clipboard clears in 30s`);
+      } catch (e) {
+        get().showToast(String(e));
+      }
+    };
+    withProtectedEnvAck(get, set, 'copy a live secret to the clipboard', () => void doCopy());
+  },
+
+  /// Copies something that is sensitive but is not a vault variable — today,
+  /// the recovery code. Gets the same 30-second clipboard wipe.
+  copyPlainText: async (text, label) => {
     try {
-      await api.copySecretToClipboard(value);
-      get().showToast(`Copied ${key}`);
+      await api.copySecretToClipboard(text);
+      get().showToast(`Copied ${label} — clipboard clears in 30s`);
     } catch (e) {
       get().showToast(String(e));
     }
@@ -385,14 +645,38 @@ export const useVaultStore = create<VaultState>((set, get) => ({
       get().showToast('Nothing to import');
       return;
     }
-    try {
-      const count = await api.importEnvText(envId, text);
-      set({ importOpen: false, importText: '' });
-      await get().refreshRepos();
-      get().showToast(`Imported ${count} variable${count === 1 ? '' : 's'}`);
-    } catch (e) {
-      get().showToast(String(e));
+
+    const runImport = async () => {
+      try {
+        const count = await api.importEnvText(envId, text);
+        set({ importOpen: false, importText: '' });
+        await get().refreshRepos();
+        get().showToast(`Imported ${count} variable${count === 1 ? '' : 's'}`);
+      } catch (e) {
+        get().showToast(String(e));
+      }
+    };
+
+    const env = activeEnv(get());
+    if (env && isProtectedEnv(env.name)) {
+      // An import silently overwrites matching keys, so say how many before it runs.
+      const incoming = parseImportKeys(text);
+      const existing = new Set(get().variables.map((v) => v.key));
+      const overwrites = incoming.filter((k) => existing.has(k)).length;
+      const additions = incoming.length - overwrites;
+      get().requestConfirm({
+        title: `Import into ${env.name}?`,
+        message:
+          `${env.name} holds live credentials. This will overwrite ${overwrites} existing value${overwrites === 1 ? '' : 's'}` +
+          ` and add ${additions} new variable${additions === 1 ? '' : 's'}.` +
+          ' Linked variables propagate the new values everywhere they are used.',
+        confirmLabel: 'Import',
+        danger: true,
+        onConfirm: runImport,
+      });
+      return;
     }
+    await runImport();
   },
 
   exportEnv: async () => {
@@ -401,31 +685,291 @@ export const useVaultStore = create<VaultState>((set, get) => ({
     const repo = repos.find((r) => r.id === activeRepoId);
     const env = repo?.envs.find((e) => e.id === activeEnvId);
     if (!repo || !env) return;
+
+    const runExport = async () => {
+      try {
+        const path = await save({ defaultPath: `${repo.name}.${env.name}.env` });
+        if (!path) return;
+        await api.exportEnvToFile(env.id, path);
+        get().showToast(`Exported ${repo.name}.${env.name}.env`);
+      } catch (e) {
+        get().showToast(String(e));
+      }
+    };
+
+    if (isProtectedEnv(env.name)) {
+      get().requestConfirm({
+        title: `Export ${env.name} secrets to a file?`,
+        message: `This writes ${env.varCount} live credential${env.varCount === 1 ? '' : 's'} to an unencrypted .env file on disk. Delete it when you are done, and keep it out of version control.`,
+        confirmLabel: 'Export anyway',
+        danger: true,
+        onConfirm: runExport,
+      });
+      return;
+    }
+    await runExport();
+  },
+
+  openHistory: async () => {
+    const envId = get().activeEnvId;
+    set({
+      historyOpen: true,
+      historySnapshots: [],
+      expandedSnapshotId: null,
+      snapshotDiff: [],
+      diffRevealed: {},
+    });
+    if (envId) {
+      const historySnapshots = await api.listSnapshotsWithStats(envId);
+      set({ historySnapshots });
+    }
+  },
+  closeHistory: () => set({ historyOpen: false, expandedSnapshotId: null, snapshotDiff: [] }),
+
+  toggleSnapshotDiff: async (snapshotId) => {
+    if (get().expandedSnapshotId === snapshotId) {
+      set({ expandedSnapshotId: null, snapshotDiff: [], diffRevealed: {} });
+      return;
+    }
+    set({ expandedSnapshotId: snapshotId, snapshotDiff: [], diffRevealed: {} });
     try {
-      const path = await save({ defaultPath: `${repo.name}.${env.name}.env` });
-      if (!path) return;
-      await api.exportEnvToFile(env.id, path);
-      get().showToast(`Exported ${repo.name}.${env.name}.env`);
+      const snapshotDiff = await api.diffSnapshot(snapshotId, 'previous');
+      // guard against a slower request landing after the user moved on
+      if (get().expandedSnapshotId === snapshotId) set({ snapshotDiff });
     } catch (e) {
       get().showToast(String(e));
     }
   },
 
-  openHistory: async () => {
-    const envId = get().activeEnvId;
-    set({ historyOpen: true, historySnapshots: [] });
-    if (envId) {
-      const historySnapshots = await api.listSnapshots(envId);
-      set({ historySnapshots });
+  toggleDiffReveal: (key) =>
+    set((s) => ({ diffRevealed: { ...s.diffRevealed, [key]: !s.diffRevealed[key] } })),
+
+  /// Shows what restoring would actually do before doing it, so a restore is
+  /// never a blind swap of the whole environment.
+  requestRestoreSnapshot: async (snapshotId, timeLabel) => {
+    let preview: DiffRow[] = [];
+    try {
+      preview = await api.diffSnapshot(snapshotId, 'current');
+    } catch (e) {
+      get().showToast(String(e));
+      return;
+    }
+
+    if (preview.length === 0) {
+      get().showToast('That snapshot matches the environment as it is now');
+      return;
+    }
+    const added = preview.filter((d) => d.kind === 'added').length;
+    const removed = preview.filter((d) => d.kind === 'removed').length;
+    const changed = preview.filter((d) => d.kind === 'changed').length;
+    const parts = [
+      added ? `restore ${added} variable${added === 1 ? '' : 's'}` : null,
+      removed ? `delete ${removed} variable${removed === 1 ? '' : 's'}` : null,
+      changed ? `change ${changed} value${changed === 1 ? '' : 's'}` : null,
+    ].filter(Boolean);
+
+    get().requestConfirm({
+      title: `Restore snapshot from ${timeLabel}?`,
+      message: `This will ${parts.join(', ')}. The environment as it stands now is snapshotted first, so you can undo this from history.`,
+      confirmLabel: 'Restore',
+      danger: false,
+      onConfirm: async () => {
+        await api.restoreSnapshot(snapshotId);
+        set({ historyOpen: false, expandedSnapshotId: null, snapshotDiff: [] });
+        await get().refreshRepos();
+        get().showToast(`Restored snapshot from ${timeLabel}`);
+      },
+    });
+  },
+
+  restoreVariableFromSnapshot: async (snapshotId, key) => {
+    try {
+      await api.restoreVariableFromSnapshot(snapshotId, key);
+      await get().refreshRepos();
+      const historySnapshots = get().activeEnvId
+        ? await api.listSnapshotsWithStats(get().activeEnvId!)
+        : [];
+      set({ historySnapshots, expandedSnapshotId: null, snapshotDiff: [] });
+      get().showToast(`Restored ${key}`);
+    } catch (e) {
+      get().showToast(String(e));
     }
   },
-  closeHistory: () => set({ historyOpen: false }),
-  restoreSnapshot: async (snapshotId, timeLabel) => {
+
+  openSettings: async () => {
+    set({
+      settingsOpen: true,
+      pwCurrent: '',
+      pwNew: '',
+      pwConfirm: '',
+      pwError: null,
+      recoveryCodeOnce: null,
+    });
     try {
-      await api.restoreSnapshot(snapshotId);
-      set({ historyOpen: false });
-      await get().refreshRepos();
-      get().showToast(`Restored snapshot from ${timeLabel}`);
+      const [needsMigration, hasRecoveryCode, backups, stored] = await Promise.all([
+        api.vaultNeedsMigration(),
+        api.vaultHasRecoveryCode(),
+        api.listBackups(),
+        api.getMeta(AUTO_LOCK_META_KEY),
+      ]);
+      set({
+        needsMigration,
+        hasRecoveryCode,
+        backups,
+        autoLockMinutes: parseAutoLock(stored),
+      });
+    } catch (e) {
+      get().showToast(String(e));
+    }
+  },
+
+  closeSettings: () =>
+    set({ settingsOpen: false, pwCurrent: '', pwNew: '', pwConfirm: '', pwError: null, recoveryCodeOnce: null }),
+
+  setPwField: (field, value) => set({ [field]: value, pwError: null } as Partial<VaultState>),
+
+  changePassword: async (remember) => {
+    const { pwCurrent, pwNew, pwConfirm } = get();
+    if (!pwNew) {
+      set({ pwError: 'Choose a new master password.' });
+      return;
+    }
+    if (pwNew !== pwConfirm) {
+      set({ pwError: 'The new passwords do not match.' });
+      return;
+    }
+    set({ pwBusy: true, pwError: null });
+    try {
+      await api.vaultChangePassword(pwCurrent, pwNew, remember);
+      set({ pwCurrent: '', pwNew: '', pwConfirm: '' });
+      const backups = await api.listBackups();
+      set({ backups });
+      get().showToast('Master password changed');
+    } catch (e) {
+      set({ pwError: String(e) });
+    } finally {
+      set({ pwBusy: false });
+    }
+  },
+
+  generateRecoveryCode: async () => {
+    const proceed = async () => {
+      try {
+        const code = await api.vaultGenerateRecoveryCode();
+        const [backups, hasRecoveryCode] = await Promise.all([
+          api.listBackups(),
+          api.vaultHasRecoveryCode(),
+        ]);
+        set({ recoveryCodeOnce: code, backups, hasRecoveryCode });
+      } catch (e) {
+        get().showToast(String(e));
+      }
+    };
+
+    if (get().hasRecoveryCode) {
+      get().requestConfirm({
+        title: 'Replace your recovery kit?',
+        message:
+          'Generating a new recovery code immediately invalidates the existing one. Any printed or saved copy of the old code will stop working.',
+        confirmLabel: 'Generate new code',
+        danger: true,
+        onConfirm: proceed,
+      });
+      return;
+    }
+    await proceed();
+  },
+
+  dismissRecoveryCode: () => set({ recoveryCodeOnce: null }),
+
+  saveRecoveryCodeToFile: async () => {
+    const code = get().recoveryCodeOnce;
+    if (!code) return;
+    try {
+      const path = await save({ defaultPath: 'vault-r-recovery-kit.txt' });
+      if (!path) return;
+      await api.saveRecoveryKit(path, code);
+      get().showToast('Recovery kit saved');
+    } catch (e) {
+      get().showToast(String(e));
+    }
+  },
+
+  exportBackup: async () => {
+    try {
+      const stamp = new Date().toISOString().slice(0, 10);
+      const path = await save({ defaultPath: `vault-r-backup-${stamp}.vrbackup` });
+      if (!path) return;
+      await api.exportBackup(path);
+      get().showToast('Encrypted backup saved');
+    } catch (e) {
+      get().showToast(String(e));
+    }
+  },
+
+  setAutoLockMinutes: async (minutes) => {
+    set({ autoLockMinutes: minutes });
+    try {
+      await api.setMeta(AUTO_LOCK_META_KEY, String(minutes));
+    } catch (e) {
+      get().showToast(String(e));
+    }
+  },
+
+  setRecoveryMode: (on) => set({ recoveryMode: on, recoveryCode: '', authError: null }),
+  setRecoveryCode: (v) => set({ recoveryCode: v }),
+
+  unlockWithRecovery: async () => {
+    const code = get().recoveryCode.trim();
+    if (!code) return;
+    set({ authBusy: true, authError: null });
+    try {
+      await api.vaultUnlockWithRecovery(code);
+      // Getting in with a recovery code means the password is unknown; make
+      // setting a new one the only way forward rather than an optional nag.
+      set({ locked: false, recoveryMode: false, recoveryCode: '', mustResetPassword: true });
+      await afterUnlock(get);
+    } catch (e) {
+      set({ authError: String(e) });
+    } finally {
+      set({ authBusy: false });
+    }
+  },
+
+  resetPasswordAfterRecovery: async (newPassword) => {
+    set({ authBusy: true, authError: null });
+    try {
+      await api.vaultResetPassword(newPassword);
+      set({ mustResetPassword: false });
+      get().showToast('Master password set');
+    } catch (e) {
+      set({ authError: String(e) });
+    } finally {
+      set({ authBusy: false });
+    }
+  },
+
+  restoreBackupFromUnlock: async () => {
+    try {
+      const picked = await open({
+        multiple: false,
+        filters: [{ name: 'Vault-R backup', extensions: ['vrbackup'] }],
+      });
+      const path = typeof picked === 'string' ? picked : null;
+      if (!path) return;
+
+      get().requestConfirm({
+        title: 'Restore this backup?',
+        message:
+          'The vault currently on this device will be replaced by the backup. A copy of it is kept first, so this can be undone. Unlock with the master password that protected the backup.',
+        confirmLabel: 'Restore backup',
+        danger: true,
+        onConfirm: async () => {
+          await api.restoreBackup(path);
+          set({ authError: null, vaultExists: true });
+          get().showToast('Backup restored — unlock with its master password');
+        },
+      });
     } catch (e) {
       get().showToast(String(e));
     }
@@ -559,20 +1103,86 @@ export const useVaultStore = create<VaultState>((set, get) => ({
   },
 
   closeAllOverlays: () =>
-    set({
+    set((s) => ({
       cmdkOpen: false,
       importOpen: false,
       shareOpen: false,
       historyOpen: false,
       linkModalOpen: false,
       groupPopoverGroupId: null,
-    }),
+      settingsOpen: false,
+      // never yank a confirmation out from under an action that is mid-flight
+      confirm: s.confirmBusy ? s.confirm : null,
+      confirmInput: s.confirmBusy ? s.confirmInput : '',
+    })),
 }));
 
 async function afterUnlock(get: () => VaultState) {
   await get().refreshRepos();
-  const onboardingDone = await api.getMeta('onboarding_done');
+  const [onboardingDone, autoLock, needsMigration] = await Promise.all([
+    api.getMeta('onboarding_done'),
+    api.getMeta(AUTO_LOCK_META_KEY),
+    api.vaultNeedsMigration(),
+  ]);
+  useVaultStore.setState({ autoLockMinutes: parseAutoLock(autoLock), needsMigration });
   if (!onboardingDone) {
     useVaultStore.setState({ onboarding: true, onboardingStep: 0 });
   }
+}
+
+function parseAutoLock(stored: string | null): number {
+  const parsed = Number(stored);
+  return stored !== null && Number.isFinite(parsed) && parsed >= 0
+    ? parsed
+    : DEFAULT_AUTO_LOCK_MINUTES;
+}
+
+function activeEnv(state: VaultState) {
+  return state.repos
+    .find((r) => r.id === state.activeRepoId)
+    ?.envs.find((e) => e.id === state.activeEnvId);
+}
+
+/// Runs `action`, but for a production-like environment asks once per session
+/// first. One acknowledgement covers every reveal and copy in that environment
+/// until the vault is locked — enough to stop an accidental click, not so much
+/// that it becomes noise to click through.
+function withProtectedEnvAck(
+  get: () => VaultState,
+  set: (partial: Partial<VaultState>) => void,
+  what: string,
+  action: () => void,
+) {
+  const state = get();
+  const env = activeEnv(state);
+  if (!env || !isProtectedEnv(env.name) || state.protectedAcknowledged[env.id]) {
+    action();
+    return;
+  }
+  state.requestConfirm({
+    title: `Show ${env.name} secrets?`,
+    message: `You are about to ${what} from ${env.name}. These are live credentials — make sure nobody is looking over your shoulder or sharing your screen. Vault-R will not ask again for this environment until you lock it.`,
+    confirmLabel: 'Show secrets',
+    danger: true,
+    onConfirm: () => {
+      set({ protectedAcknowledged: { ...get().protectedAcknowledged, [env.id]: true } });
+      action();
+    },
+  });
+}
+
+/// The keys an import would touch. Mirrors `parse_env_text` in vault-core
+/// closely enough to count overwrites for the confirmation copy; the import
+/// itself is still parsed in Rust.
+function parseImportKeys(text: string): string[] {
+  const keys: string[] = [];
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#')) continue;
+    const eq = line.indexOf('=');
+    if (eq <= 0) continue;
+    const key = line.slice(0, eq).trim();
+    if (key && !keys.includes(key)) keys.push(key);
+  }
+  return keys;
 }

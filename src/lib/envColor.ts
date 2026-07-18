@@ -1,3 +1,10 @@
+/// Environments whose secrets are the real ones. Revealing, copying, exporting
+/// or overwriting these asks first — the cost of a slip is a live credential,
+/// not a local one.
+export function isProtectedEnv(name: string): boolean {
+  return /^(prod|production|live)$/i.test(name.trim());
+}
+
 export function envColor(name: string): string {
   if (name === 'local') return 'var(--env-local)';
   if (name === 'staging') return 'var(--env-staging)';

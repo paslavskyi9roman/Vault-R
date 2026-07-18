@@ -2,8 +2,8 @@ use crate::db::Vault;
 use crate::dotenv::{parse_env_text, serialize_env};
 use crate::error::{Result, VaultError};
 use crate::models::{
-    Environment, EnvironmentSummary, GroupMember, Member, Repo, RepoSummary, SearchResult,
-    Snapshot, SnapshotVariable, Variable, VariableWithUsage,
+    DiffRow, Environment, EnvironmentSummary, GroupMember, Member, Repo, RepoSummary, SearchResult,
+    Snapshot, SnapshotVariable, SnapshotWithStats, Variable, VariableWithUsage,
 };
 use chrono::Utc;
 use rusqlite::{params, OptionalExtension};
@@ -27,6 +27,83 @@ fn map_unique(e: rusqlite::Error, what: &str) -> VaultError {
         }
     }
     VaultError::Db(e)
+}
+
+/// Compares two point-in-time variable sets by key. Rows come back sorted by
+/// key so the history view has a stable order regardless of insertion order.
+fn diff_variable_sets(before: &[SnapshotVariable], after: &[SnapshotVariable]) -> Vec<DiffRow> {
+    let old: HashMap<&str, &str> = before.iter().map(|v| (v.key.as_str(), v.value.as_str())).collect();
+    let new: HashMap<&str, &str> = after.iter().map(|v| (v.key.as_str(), v.value.as_str())).collect();
+
+    let mut rows: Vec<DiffRow> = Vec::new();
+    for (key, new_value) in &new {
+        match old.get(key) {
+            None => rows.push(DiffRow {
+                key: (*key).to_string(),
+                kind: "added".into(),
+                old_value: None,
+                new_value: Some((*new_value).to_string()),
+            }),
+            Some(old_value) if old_value != new_value => rows.push(DiffRow {
+                key: (*key).to_string(),
+                kind: "changed".into(),
+                old_value: Some((*old_value).to_string()),
+                new_value: Some((*new_value).to_string()),
+            }),
+            Some(_) => {}
+        }
+    }
+    for (key, old_value) in &old {
+        if !new.contains_key(key) {
+            rows.push(DiffRow {
+                key: (*key).to_string(),
+                kind: "removed".into(),
+                old_value: Some((*old_value).to_string()),
+                new_value: None,
+            });
+        }
+    }
+    rows.sort_by(|a, b| a.key.cmp(&b.key));
+    rows
+}
+
+/// Dissolves link groups that no longer have at least two members — which is
+/// what a cascade delete of a repo or environment can leave behind — and drops
+/// the now-empty `groups` rows. Returns the environments whose variables were
+/// unlinked, so callers can snapshot them.
+fn prune_orphan_groups(conn: &rusqlite::Connection) -> Result<Vec<String>> {
+    let stale_groups: Vec<String> = {
+        let mut stmt = conn.prepare(
+            "SELECT g.id FROM groups g
+             WHERE (SELECT COUNT(*) FROM variables v WHERE v.group_id = g.id) < 2",
+        )?;
+        let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+        let mut v = Vec::new();
+        for row in rows {
+            v.push(row?);
+        }
+        v
+    };
+
+    let mut affected_envs: Vec<String> = Vec::new();
+    for group_id in &stale_groups {
+        {
+            let mut stmt = conn.prepare("SELECT env_id FROM variables WHERE group_id = ?1")?;
+            let rows = stmt.query_map(params![group_id], |r| r.get::<_, String>(0))?;
+            for row in rows {
+                let env_id = row?;
+                if !affected_envs.contains(&env_id) {
+                    affected_envs.push(env_id);
+                }
+            }
+        }
+        conn.execute(
+            "UPDATE variables SET group_id = NULL WHERE group_id = ?1",
+            params![group_id],
+        )?;
+        conn.execute("DELETE FROM groups WHERE id = ?1", params![group_id])?;
+    }
+    Ok(affected_envs)
 }
 
 fn row_to_variable(row: &rusqlite::Row) -> rusqlite::Result<Variable> {
@@ -87,8 +164,40 @@ impl Vault {
         Ok(out)
     }
 
+    pub fn rename_repo(&self, id: &str, new_name: &str) -> Result<()> {
+        let new_name = new_name.trim();
+        if new_name.is_empty() {
+            return Err(VaultError::InvalidInput("repo name must not be empty".into()));
+        }
+        let affected = self
+            .conn
+            .execute(
+                "UPDATE repos SET name = ?1 WHERE id = ?2",
+                params![new_name, id],
+            )
+            .map_err(|e| map_unique(e, "repo"))?;
+        if affected == 0 {
+            return Err(VaultError::Missing(format!("repo {id}")));
+        }
+        self.persist()?;
+        Ok(())
+    }
+
+    /// Deletes a repo and everything under it. Environments, variables and
+    /// snapshots cascade; link groups that are left with fewer than two members
+    /// as a result are dissolved so the "linked xN" counts stay truthful.
     pub fn delete_repo(&self, id: &str) -> Result<()> {
-        self.conn.execute("DELETE FROM repos WHERE id = ?1", params![id])?;
+        let tx = self.conn.unchecked_transaction()?;
+        let affected = tx.execute("DELETE FROM repos WHERE id = ?1", params![id])?;
+        if affected == 0 {
+            return Err(VaultError::Missing(format!("repo {id}")));
+        }
+        let dissolved_envs = prune_orphan_groups(&tx)?;
+        tx.commit()?;
+
+        for env_id in &dissolved_envs {
+            self.snapshot_env_internal(env_id, "Link group dissolved")?;
+        }
         self.persist()?;
         Ok(())
     }
@@ -169,9 +278,41 @@ impl Vault {
         Ok(out)
     }
 
+    pub fn rename_environment(&self, id: &str, new_name: &str) -> Result<()> {
+        let new_name = new_name.trim();
+        if new_name.is_empty() {
+            return Err(VaultError::InvalidInput(
+                "environment name must not be empty".into(),
+            ));
+        }
+        let affected = self
+            .conn
+            .execute(
+                "UPDATE environments SET name = ?1 WHERE id = ?2",
+                params![new_name, id],
+            )
+            .map_err(|e| map_unique(e, "environment"))?;
+        if affected == 0 {
+            return Err(VaultError::Missing(format!("environment {id}")));
+        }
+        self.persist()?;
+        Ok(())
+    }
+
+    /// Deletes an environment with its variables and snapshots. Link groups
+    /// left with fewer than two members are dissolved (see [`Vault::delete_repo`]).
     pub fn delete_environment(&self, id: &str) -> Result<()> {
-        self.conn
-            .execute("DELETE FROM environments WHERE id = ?1", params![id])?;
+        let tx = self.conn.unchecked_transaction()?;
+        let affected = tx.execute("DELETE FROM environments WHERE id = ?1", params![id])?;
+        if affected == 0 {
+            return Err(VaultError::Missing(format!("environment {id}")));
+        }
+        let dissolved_envs = prune_orphan_groups(&tx)?;
+        tx.commit()?;
+
+        for env_id in &dissolved_envs {
+            self.snapshot_env_internal(env_id, "Link group dissolved")?;
+        }
         self.persist()?;
         Ok(())
     }
@@ -288,6 +429,29 @@ impl Vault {
         for env_id in &affected_envs {
             self.snapshot_env_internal(env_id, &format!("Updated {}", var.key))?;
         }
+        self.persist()?;
+        Ok(())
+    }
+
+    /// Renames a variable's key within its own environment. Link groups sync
+    /// *values*, not keys, so group membership is deliberately left untouched —
+    /// a renamed variable keeps syncing with its partners under the new name.
+    pub fn rename_variable_key(&self, var_id: &str, new_key: &str) -> Result<()> {
+        let new_key = new_key.trim();
+        if new_key.is_empty() {
+            return Err(VaultError::InvalidInput("key must not be empty".into()));
+        }
+        let var = self.get_variable(var_id)?;
+        if var.key == new_key {
+            return Ok(());
+        }
+        self.conn
+            .execute(
+                "UPDATE variables SET key = ?1, updated_at = ?2 WHERE id = ?3",
+                params![new_key, now(), var_id],
+            )
+            .map_err(|e| map_unique(e, "variable"))?;
+        self.snapshot_env_internal(&var.env_id, &format!("Renamed {} to {}", var.key, new_key))?;
         self.persist()?;
         Ok(())
     }
@@ -642,6 +806,103 @@ impl Vault {
             out.push(r?);
         }
         Ok(out)
+    }
+
+    fn snapshot_by_id(&self, snapshot_id: &str) -> Result<Snapshot> {
+        self.conn
+            .query_row(
+                "SELECT id, env_id, created_at, summary, payload FROM snapshots WHERE id = ?1",
+                params![snapshot_id],
+                |r| {
+                    Ok(Snapshot {
+                        id: r.get(0)?,
+                        env_id: r.get(1)?,
+                        created_at: r.get(2)?,
+                        summary: r.get(3)?,
+                        payload: r.get(4)?,
+                    })
+                },
+            )
+            .optional()?
+            .ok_or_else(|| VaultError::Missing(format!("snapshot {snapshot_id}")))
+    }
+
+    /// Snapshots for an environment, newest first, each annotated with what it
+    /// changed relative to the snapshot before it.
+    pub fn list_snapshots_with_stats(&self, env_id: &str) -> Result<Vec<SnapshotWithStats>> {
+        let newest_first = self.list_snapshots(env_id)?;
+        let mut out = Vec::with_capacity(newest_first.len());
+        for (i, snap) in newest_first.iter().enumerate() {
+            // the list is newest-first, so a snapshot's predecessor is the next element
+            let before: Vec<SnapshotVariable> = match newest_first.get(i + 1) {
+                Some(prev) => serde_json::from_str(&prev.payload)?,
+                None => Vec::new(),
+            };
+            let after: Vec<SnapshotVariable> = serde_json::from_str(&snap.payload)?;
+            let rows = diff_variable_sets(&before, &after);
+            out.push(SnapshotWithStats {
+                snapshot: snap.clone(),
+                added: rows.iter().filter(|r| r.kind == "added").count() as i64,
+                removed: rows.iter().filter(|r| r.kind == "removed").count() as i64,
+                changed: rows.iter().filter(|r| r.kind == "changed").count() as i64,
+            });
+        }
+        Ok(out)
+    }
+
+    /// What changed in this snapshot (`against` = `"previous"`), or what
+    /// restoring it would change (`against` = `"current"`).
+    pub fn diff_snapshot(&self, snapshot_id: &str, against: &str) -> Result<Vec<DiffRow>> {
+        let snap = self.snapshot_by_id(snapshot_id)?;
+        let target: Vec<SnapshotVariable> = serde_json::from_str(&snap.payload)?;
+
+        let baseline: Vec<SnapshotVariable> = match against {
+            "current" => self
+                .list_variables(&snap.env_id)?
+                .into_iter()
+                .map(|v| SnapshotVariable {
+                    key: v.key,
+                    value: v.value,
+                    group_id: v.group_id,
+                })
+                .collect(),
+            "previous" => {
+                let all = self.list_snapshots(&snap.env_id)?;
+                let idx = all.iter().position(|s| s.id == snap.id);
+                match idx.and_then(|i| all.get(i + 1)) {
+                    Some(prev) => serde_json::from_str(&prev.payload)?,
+                    None => Vec::new(),
+                }
+            }
+            other => {
+                return Err(VaultError::InvalidInput(format!(
+                    "unknown diff baseline '{other}' (expected 'previous' or 'current')"
+                )))
+            }
+        };
+
+        Ok(diff_variable_sets(&baseline, &target))
+    }
+
+    /// Restores a single key from a snapshot, leaving the rest of the
+    /// environment alone. The write goes through the normal value-update path,
+    /// so a linked variable still propagates to its whole group.
+    pub fn restore_variable_from_snapshot(&self, snapshot_id: &str, key: &str) -> Result<()> {
+        let snap = self.snapshot_by_id(snapshot_id)?;
+        let vars: Vec<SnapshotVariable> = serde_json::from_str(&snap.payload)?;
+        let wanted = vars
+            .into_iter()
+            .find(|v| v.key == key)
+            .ok_or_else(|| VaultError::Missing(format!("{key} in this snapshot")))?;
+
+        let existing = self
+            .list_variables(&snap.env_id)?
+            .into_iter()
+            .find(|v| v.key == key);
+        match existing {
+            Some(v) => self.update_variable_value(&v.id, &wanted.value),
+            None => self.add_variable(&snap.env_id, &wanted.key, &wanted.value).map(|_| ()),
+        }
     }
 
     /// Replaces the environment's current variables with a prior snapshot's

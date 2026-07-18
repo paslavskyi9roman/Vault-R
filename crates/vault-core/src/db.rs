@@ -1,4 +1,6 @@
-use crate::crypto::{decrypt, derive_key, encrypt, DerivedKey, VaultMetaFile};
+use crate::crypto::{
+    decrypt, derive_key, encrypt, DerivedKey, KeySlot, VaultHeader, VaultMetaFile,
+};
 use crate::error::{Result, VaultError};
 use crate::paths;
 use rusqlite::serialize::OwnedData;
@@ -8,6 +10,77 @@ use std::os::raw::c_int;
 use std::path::{Path, PathBuf};
 use std::ptr::NonNull;
 use zeroize::Zeroize;
+
+/// Leading bytes of a v2 vault file. Eight bytes so that a v1 blob — which
+/// begins with a random nonce — cannot plausibly be mistaken for one.
+const MAGIC: &[u8; 8] = b"VAULT-R2";
+const FORMAT_VERSION: u32 = 2;
+
+/// How the vault on disk is laid out.
+///
+/// **V2** is the current format: a single self-describing file whose header
+/// holds one key slot per way of unlocking (master password, optional recovery
+/// code), each wrapping the same random data key that actually encrypts the
+/// database. **V1** is the original layout — the database encrypted directly
+/// under `Argon2id(password)`, with the salt in a plaintext `vault.meta.json`
+/// sidecar. V1 vaults are still opened and written, and are upgraded in place
+/// the next time they are unlocked with a password (see [`Vault::open_in`]);
+/// a vault unlocked from the OS keychain has no password to build a slot from,
+/// so it stays V1 until the user types one.
+#[derive(Debug)]
+enum Format {
+    V1,
+    V2 { header: VaultHeader },
+}
+
+/// A vault file split into "how to get the data key" and "the encrypted image".
+enum VaultFile {
+    V1 { blob: Vec<u8> },
+    V2 { header: VaultHeader, payload: Vec<u8> },
+}
+
+fn read_vault_file(path: &Path) -> Result<VaultFile> {
+    let bytes = fs::read(path)?;
+    if bytes.len() < MAGIC.len() || &bytes[..MAGIC.len()] != MAGIC {
+        return Ok(VaultFile::V1 { blob: bytes });
+    }
+    let len_at = MAGIC.len();
+    let body_at = len_at + 4;
+    if bytes.len() < body_at {
+        return Err(VaultError::Crypto("vault file header is truncated".into()));
+    }
+    let header_len = u32::from_le_bytes([
+        bytes[len_at],
+        bytes[len_at + 1],
+        bytes[len_at + 2],
+        bytes[len_at + 3],
+    ]) as usize;
+    let payload_at = body_at
+        .checked_add(header_len)
+        .ok_or_else(|| VaultError::Crypto("vault file header length is invalid".into()))?;
+    if bytes.len() < payload_at {
+        return Err(VaultError::Crypto("vault file header is truncated".into()));
+    }
+    let header: VaultHeader = serde_json::from_slice(&bytes[body_at..payload_at])?;
+    Ok(VaultFile::V2 {
+        header,
+        payload: bytes[payload_at..].to_vec(),
+    })
+}
+
+/// Serializes a v2 vault file: magic, header length, header JSON, then the
+/// encrypted database image.
+fn encode_v2(header: &VaultHeader, payload: &[u8]) -> Result<Vec<u8>> {
+    let header_json = serde_json::to_vec(header)?;
+    let header_len = u32::try_from(header_json.len())
+        .map_err(|_| VaultError::Crypto("vault header too large".into()))?;
+    let mut out = Vec::with_capacity(MAGIC.len() + 4 + header_json.len() + payload.len());
+    out.extend_from_slice(MAGIC);
+    out.extend_from_slice(&header_len.to_le_bytes());
+    out.extend_from_slice(&header_json);
+    out.extend_from_slice(payload);
+    Ok(out)
+}
 
 /// An unlocked vault: a live **in-memory** SQLite database, backed by an
 /// AES-256-GCM encrypted blob on disk that is the only artifact meant to
@@ -21,8 +94,13 @@ use zeroize::Zeroize;
 #[derive(Debug)]
 pub struct Vault {
     pub(crate) conn: Connection,
+    /// The key the database image is encrypted under. In a v2 vault this is a
+    /// random data key recovered from a key slot; in a legacy v1 vault it is
+    /// `Argon2id(password)` itself.
     key: DerivedKey,
+    format: Format,
     blob_path: PathBuf,
+    dir: PathBuf,
 }
 
 fn meta_file_path(dir: &Path) -> PathBuf {
@@ -132,10 +210,15 @@ impl Vault {
         Self::open_in(&paths::data_dir()?, password)
     }
 
-    /// Opens using a raw derived key (from the OS keychain) instead of a
+    /// Opens using a raw data key (from the OS keychain) instead of a
     /// password, skipping the slow Argon2id derivation.
     pub fn open_with_key(key_hex: &str) -> Result<Self> {
         Self::open_with_key_in(&paths::data_dir()?, key_hex)
+    }
+
+    /// Opens using the recovery code from the user's recovery kit.
+    pub fn open_with_recovery(code: &str) -> Result<Self> {
+        Self::open_with_recovery_in(&paths::data_dir()?, code)
     }
 
     /// Same as [`Vault::create`] but rooted at an arbitrary directory —
@@ -143,15 +226,17 @@ impl Vault {
     pub fn create_in(dir: &Path, password: &str) -> Result<Self> {
         fs::create_dir_all(dir)?;
         let blob_path = blob_file_path(dir);
-        let meta_path = meta_file_path(dir);
         if blob_path.exists() {
             return Err(VaultError::AlreadyExists(blob_path));
         }
-
-        let meta = VaultMetaFile::new_random();
-        let key = derive_key(password, &meta)?;
-        fs::write(&meta_path, serde_json::to_vec_pretty(&meta)?)?;
         remove_legacy_session_file(dir);
+
+        let key = DerivedKey::random();
+        let header = VaultHeader {
+            version: FORMAT_VERSION,
+            password: KeySlot::seal(password, &key)?,
+            recovery: None,
+        };
 
         let conn = Connection::open_in_memory()?;
         configure_connection(&conn)?;
@@ -160,57 +245,93 @@ impl Vault {
         let vault = Vault {
             conn,
             key,
+            format: Format::V2 { header },
             blob_path,
+            dir: dir.to_path_buf(),
         };
         vault.persist()?;
         Ok(vault)
     }
 
+    /// Opens the vault with a master password. A legacy v1 vault is decrypted
+    /// with the old scheme and then immediately rewritten in the v2 format —
+    /// this is the only moment we hold both the password and the plaintext, so
+    /// it is the only moment the upgrade can happen.
     pub fn open_in(dir: &Path, password: &str) -> Result<Self> {
-        let meta_path = meta_file_path(dir);
         let blob_path = blob_file_path(dir);
-        if !meta_path.exists() || !blob_path.exists() {
+        if !blob_path.exists() {
             return Err(VaultError::NotFound(blob_path));
         }
-
-        let meta: VaultMetaFile = serde_json::from_slice(&fs::read(&meta_path)?)?;
-        let key = derive_key(password, &meta)?;
-        let blob = fs::read(&blob_path)?;
-        let mut plaintext = decrypt(&key, &blob)?;
         remove_legacy_session_file(dir);
 
-        let vault = Self::from_plaintext(key, blob_path, &plaintext);
-        plaintext.zeroize();
-        vault
+        match read_vault_file(&blob_path)? {
+            VaultFile::V2 { header, payload } => {
+                let key = header.password.open(password)?;
+                let mut plaintext = decrypt(&key, &payload)?;
+                let vault = Self::from_plaintext(key, Format::V2 { header }, dir, &plaintext);
+                plaintext.zeroize();
+                vault
+            }
+            VaultFile::V1 { blob } => {
+                let meta_path = meta_file_path(dir);
+                if !meta_path.exists() {
+                    return Err(VaultError::Crypto(
+                        "vault file is not recognized and its key metadata is missing".into(),
+                    ));
+                }
+                let meta: VaultMetaFile = serde_json::from_slice(&fs::read(&meta_path)?)?;
+                let legacy_key = derive_key(password, &meta)?;
+                let mut plaintext = decrypt(&legacy_key, &blob)?;
+
+                // Upgrade in place: a fresh random data key, wrapped under a
+                // slot derived from the same password the user just proved.
+                let key = DerivedKey::random();
+                let header = VaultHeader {
+                    version: FORMAT_VERSION,
+                    password: KeySlot::seal(password, &key)?,
+                    recovery: None,
+                };
+                let vault = Self::from_plaintext(key, Format::V2 { header }, dir, &plaintext);
+                plaintext.zeroize();
+                let vault = vault?;
+                vault.persist()?;
+                // Only once the v2 file is safely in place is the sidecar
+                // redundant; a crash before this point simply retries.
+                let _ = fs::remove_file(&meta_path);
+                Ok(vault)
+            }
+        }
     }
 
+    /// Opens using a data key remembered in the OS keychain. A v1 vault stays
+    /// in v1 format here — without a password there is no way to build a key
+    /// slot — and reports [`Vault::needs_migration`] so the UI can ask for one.
     pub fn open_with_key_in(dir: &Path, key_hex: &str) -> Result<Self> {
         let blob_path = blob_file_path(dir);
         if !blob_path.exists() {
             return Err(VaultError::NotFound(blob_path));
         }
-        let mut key_bytes = hex::decode(key_hex).map_err(|e| VaultError::Crypto(e.to_string()))?;
-        if key_bytes.len() != 32 {
-            key_bytes.zeroize();
-            return Err(VaultError::Crypto("stored key has wrong length".into()));
-        }
-        let mut arr = [0u8; 32];
-        arr.copy_from_slice(&key_bytes);
-        key_bytes.zeroize();
-        let key = DerivedKey(arr);
-
-        let blob = fs::read(&blob_path)?;
-        let mut plaintext = decrypt(&key, &blob)?;
+        let key = DerivedKey::from_hex(key_hex)?;
         remove_legacy_session_file(dir);
 
-        let vault = Self::from_plaintext(key, blob_path, &plaintext);
+        let (format, payload) = match read_vault_file(&blob_path)? {
+            VaultFile::V2 { header, payload } => (Format::V2 { header }, payload),
+            VaultFile::V1 { blob } => (Format::V1, blob),
+        };
+        let mut plaintext = decrypt(&key, &payload)?;
+        let vault = Self::from_plaintext(key, format, dir, &plaintext);
         plaintext.zeroize();
         vault
     }
 
     /// Builds an unlocked vault by loading a decrypted SQLite image into a
     /// fresh in-memory database. `plaintext` is never written to disk.
-    fn from_plaintext(key: DerivedKey, blob_path: PathBuf, plaintext: &[u8]) -> Result<Self> {
+    fn from_plaintext(
+        key: DerivedKey,
+        format: Format,
+        dir: &Path,
+        plaintext: &[u8],
+    ) -> Result<Self> {
         let mut conn = Connection::open_in_memory()?;
         let data = owned_data_from(plaintext)?;
         conn.deserialize(DatabaseName::Main, data, false)?;
@@ -219,25 +340,157 @@ impl Vault {
         Ok(Vault {
             conn,
             key,
-            blob_path,
+            format,
+            blob_path: blob_file_path(dir),
+            dir: dir.to_path_buf(),
         })
     }
 
-    /// The raw derived key as hex, for callers that want to stash it in the
-    /// OS keychain for "remember on this device".
+    /// The data key as hex, for callers that want to stash it in the OS
+    /// keychain for "remember on this device". Because this is the data key
+    /// and not a password-derived key, a remembered entry survives a master
+    /// password change.
     pub fn key_hex(&self) -> String {
-        hex::encode(self.key.0)
+        self.key.to_hex()
+    }
+
+    /// True for a vault still stored in the legacy v1 format, which cannot
+    /// support a recovery kit or a password change until it is upgraded by
+    /// unlocking once with the master password.
+    pub fn needs_migration(&self) -> bool {
+        matches!(self.format, Format::V1)
+    }
+
+    pub fn dir(&self) -> &Path {
+        &self.dir
+    }
+
+    /// The raw, **unencrypted** SQLite image of the open vault. Holding an
+    /// unlocked `Vault` already grants access to every secret in it, so this
+    /// exposes nothing new — but the bytes must never be written to disk.
+    pub fn serialize_image(&self) -> Result<Vec<u8>> {
+        Ok(self.conn.serialize(DatabaseName::Main)?.to_vec())
     }
 
     /// Serializes the in-memory database, encrypts the image, and atomically
-    /// replaces the on-disk vault blob. Called after every mutating operation.
+    /// replaces the on-disk vault file. Called after every mutating operation.
     pub(crate) fn persist(&self) -> Result<()> {
         let image = self.conn.serialize(DatabaseName::Main)?;
         let ciphertext = encrypt(&self.key, &image)?;
+        let bytes = match &self.format {
+            Format::V1 => ciphertext,
+            Format::V2 { header } => encode_v2(header, &ciphertext)?,
+        };
         let tmp_path = self.blob_path.with_extension("enc.tmp");
-        fs::write(&tmp_path, &ciphertext)?;
+        fs::write(&tmp_path, &bytes)?;
         fs::rename(&tmp_path, &self.blob_path)?;
         Ok(())
+    }
+
+    /// Replaces the password key slot with one sealed under `new_password`,
+    /// after proving `current_password` opens the existing one. The data key is
+    /// untouched, so the database is not re-encrypted and any recovery kit
+    /// stays valid.
+    pub fn change_password(&mut self, current_password: &str, new_password: &str) -> Result<()> {
+        if new_password.is_empty() {
+            return Err(VaultError::InvalidInput(
+                "new master password must not be empty".into(),
+            ));
+        }
+        let Format::V2 { header } = &self.format else {
+            return Err(VaultError::InvalidInput(
+                "this vault must be unlocked with its master password once before \
+                 the password can be changed"
+                    .into(),
+            ));
+        };
+        // Proves the current password and re-derives the same data key.
+        let key = header.password.open(current_password)?;
+        let new_header = VaultHeader {
+            version: FORMAT_VERSION,
+            password: KeySlot::seal(new_password, &key)?,
+            recovery: header.recovery.clone(),
+        };
+        self.format = Format::V2 { header: new_header };
+        self.persist()
+    }
+
+    /// Generates a new recovery code and seals the data key under it, replacing
+    /// any previous recovery slot. The returned code is the only copy — it is
+    /// never stored in recoverable form.
+    pub fn generate_recovery_code(&mut self) -> Result<String> {
+        let Format::V2 { header } = &self.format else {
+            return Err(VaultError::InvalidInput(
+                "this vault must be unlocked with its master password once before \
+                 a recovery kit can be created"
+                    .into(),
+            ));
+        };
+        let code = crate::crypto::new_recovery_code();
+        // Seal under the canonical form so the user may retype the code with or
+        // without its grouping hyphens.
+        let new_header = VaultHeader {
+            version: FORMAT_VERSION,
+            password: header.password.clone(),
+            recovery: Some(KeySlot::seal(
+                &crate::crypto::normalize_recovery_code(&code),
+                &self.key,
+            )?),
+        };
+        self.format = Format::V2 { header: new_header };
+        self.persist()?;
+        Ok(code)
+    }
+
+    pub fn has_recovery_code(&self) -> bool {
+        matches!(&self.format, Format::V2 { header } if header.recovery.is_some())
+    }
+
+    /// Opens the vault with a recovery code instead of the master password.
+    pub fn open_with_recovery_in(dir: &Path, code: &str) -> Result<Self> {
+        let blob_path = blob_file_path(dir);
+        if !blob_path.exists() {
+            return Err(VaultError::NotFound(blob_path));
+        }
+        remove_legacy_session_file(dir);
+
+        let VaultFile::V2 { header, payload } = read_vault_file(&blob_path)? else {
+            return Err(VaultError::InvalidInput(
+                "this vault has no recovery kit".into(),
+            ));
+        };
+        let slot = header
+            .recovery
+            .as_ref()
+            .ok_or_else(|| VaultError::InvalidInput("this vault has no recovery kit".into()))?;
+        let key = slot.open(&crate::crypto::normalize_recovery_code(code))?;
+        let mut plaintext = decrypt(&key, &payload)?;
+        let vault = Self::from_plaintext(key, Format::V2 { header }, dir, &plaintext);
+        plaintext.zeroize();
+        vault
+    }
+
+    /// Sets the master password without knowing the old one. Only reachable
+    /// once the caller has already unlocked the vault (via a recovery code),
+    /// which is the proof of ownership.
+    pub fn reset_password(&mut self, new_password: &str) -> Result<()> {
+        if new_password.is_empty() {
+            return Err(VaultError::InvalidInput(
+                "new master password must not be empty".into(),
+            ));
+        }
+        let Format::V2 { header } = &self.format else {
+            return Err(VaultError::InvalidInput(
+                "this vault must be upgraded before its password can be reset".into(),
+            ));
+        };
+        let new_header = VaultHeader {
+            version: FORMAT_VERSION,
+            password: KeySlot::seal(new_password, &self.key)?,
+            recovery: header.recovery.clone(),
+        };
+        self.format = Format::V2 { header: new_header };
+        self.persist()
     }
 
     /// Drops the in-memory database and zeroizes the key. There is no plaintext

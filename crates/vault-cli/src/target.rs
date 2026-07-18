@@ -44,6 +44,28 @@ pub fn resolve_env(vault: &Vault, target: &str, create: bool) -> Result<(Repo, E
     Ok((repo, env))
 }
 
+/// Resolves a target that names either a whole repo (`api-gateway`) or one of
+/// its environments (`api-gateway/local`).
+pub fn resolve_repo_or_env(
+    vault: &Vault,
+    target: &str,
+) -> Result<(Repo, Option<Environment>)> {
+    match target.split_once('/') {
+        Some(_) => {
+            let (repo, env) = resolve_env(vault, target, false)?;
+            Ok((repo, Some(env)))
+        }
+        None => {
+            let repo = vault
+                .list_repos()?
+                .into_iter()
+                .find(|r| r.name == target)
+                .ok_or_else(|| VaultError::Missing(format!("repo '{target}'")))?;
+            Ok((repo, None))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::parse_target;

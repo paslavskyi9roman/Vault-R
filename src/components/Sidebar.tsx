@@ -12,6 +12,9 @@ export function Sidebar() {
   const addingEnvFor = useVaultStore((s) => s.addingEnvFor);
   const newEnvName = useVaultStore((s) => s.newEnvName);
   const linkedGroupCount = useVaultStore((s) => s.linkedGroupCount);
+  const renamingRepoId = useVaultStore((s) => s.renamingRepoId);
+  const renamingEnvId = useVaultStore((s) => s.renamingEnvId);
+  const renameDraft = useVaultStore((s) => s.renameDraft);
 
   const toggleExpandRepo = useVaultStore((s) => s.toggleExpandRepo);
   const toggleAddRepo = useVaultStore((s) => s.toggleAddRepo);
@@ -22,6 +25,13 @@ export function Sidebar() {
   const setNewEnvName = useVaultStore((s) => s.setNewEnvName);
   const submitAddEnv = useVaultStore((s) => s.submitAddEnv);
   const selectEnv = useVaultStore((s) => s.selectEnv);
+  const startRenameRepo = useVaultStore((s) => s.startRenameRepo);
+  const startRenameEnv = useVaultStore((s) => s.startRenameEnv);
+  const setRenameDraft = useVaultStore((s) => s.setRenameDraft);
+  const cancelRename = useVaultStore((s) => s.cancelRename);
+  const submitRename = useVaultStore((s) => s.submitRename);
+  const requestDeleteRepo = useVaultStore((s) => s.requestDeleteRepo);
+  const requestDeleteEnv = useVaultStore((s) => s.requestDeleteEnv);
 
   return (
     <div style={sidebarStyle}>
@@ -48,25 +58,72 @@ export function Sidebar() {
           const expanded = !!expandedRepos[repo.id];
           return (
             <div key={repo.id}>
-              <div style={repoRowStyle} onClick={() => toggleExpandRepo(repo.id)}>
-                <span style={chevronStyle}>{expanded ? '▾' : '▸'}</span>
-                <span style={repoNameStyle}>{repo.name}</span>
-                <span style={countPillStyle}>{repo.envs.length}</span>
-                <span
-                  style={addBtnSmallStyle}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    startAddEnv(repo.id);
-                  }}
-                >
-                  +
-                </span>
-              </div>
+              {renamingRepoId === repo.id ? (
+                <InlineForm
+                  placeholder="repo-name"
+                  value={renameDraft}
+                  onChange={setRenameDraft}
+                  onSubmit={() => void submitRename()}
+                  onCancel={cancelRename}
+                  submitLabel="Save"
+                  style={inlineAddFormStyle}
+                />
+              ) : (
+                <div style={repoRowStyle} onClick={() => toggleExpandRepo(repo.id)}>
+                  <span style={chevronStyle}>{expanded ? '▾' : '▸'}</span>
+                  <span style={repoNameStyle}>{repo.name}</span>
+                  <span style={countPillStyle}>{repo.envs.length}</span>
+                  <span
+                    style={rowActionStyle}
+                    title={`Add environment to ${repo.name}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      startAddEnv(repo.id);
+                    }}
+                  >
+                    +
+                  </span>
+                  <span
+                    style={rowActionStyle}
+                    title={`Rename ${repo.name}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      startRenameRepo(repo.id, repo.name);
+                    }}
+                  >
+                    &#9998;
+                  </span>
+                  <span
+                    style={rowActionDangerStyle}
+                    title={`Delete ${repo.name}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      requestDeleteRepo(repo.id, repo.name);
+                    }}
+                  >
+                    &times;
+                  </span>
+                </div>
+              )}
 
               {expanded && (
                 <div>
                   {repo.envs.map((env) => {
                     const isActive = repo.id === activeRepoId && env.id === activeEnvId;
+                    if (renamingEnvId === env.id) {
+                      return (
+                        <InlineForm
+                          key={env.id}
+                          placeholder="env-name"
+                          value={renameDraft}
+                          onChange={setRenameDraft}
+                          onSubmit={() => void submitRename()}
+                          onCancel={cancelRename}
+                          submitLabel="Save"
+                          style={inlineAddEnvFormStyle}
+                        />
+                      );
+                    }
                     return (
                       <div
                         key={env.id}
@@ -82,6 +139,26 @@ export function Sidebar() {
                           {env.name}
                         </span>
                         <span style={envCountStyle}>{env.varCount}</span>
+                        <span
+                          style={rowActionStyle}
+                          title={`Rename ${env.name}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            startRenameEnv(env.id, env.name);
+                          }}
+                        >
+                          &#9998;
+                        </span>
+                        <span
+                          style={rowActionDangerStyle}
+                          title={`Delete ${env.name}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            requestDeleteEnv(env.id, repo.name, env.name);
+                          }}
+                        >
+                          &times;
+                        </span>
                       </div>
                     );
                   })}
@@ -122,6 +199,7 @@ function InlineForm(props: {
   onChange: (v: string) => void;
   onSubmit: () => void;
   onCancel: () => void;
+  submitLabel?: string;
   style: React.CSSProperties;
 }) {
   function onKeyDown(e: KeyboardEvent<HTMLInputElement>) {
@@ -137,9 +215,11 @@ function InlineForm(props: {
         onChange={(e) => props.onChange(e.target.value)}
         onKeyDown={onKeyDown}
         autoFocus
+        spellCheck={false}
+        autoComplete="off"
       />
       <button style={inlineAddConfirmStyle} onClick={props.onSubmit}>
-        Add
+        {props.submitLabel ?? 'Add'}
       </button>
       <button style={inlineAddCancelStyle} onClick={props.onCancel}>
         &times;
@@ -176,7 +256,7 @@ const addBtnStyle: React.CSSProperties = {
   fontSize: '13px',
   lineHeight: '1',
 };
-const addBtnSmallStyle: React.CSSProperties = {
+const rowActionStyle: React.CSSProperties = {
   width: '16px',
   height: '16px',
   borderRadius: '4px',
@@ -184,8 +264,10 @@ const addBtnSmallStyle: React.CSSProperties = {
   cursor: 'pointer',
   fontSize: '12px',
   textAlign: 'center',
+  lineHeight: '16px',
   flexShrink: 0,
 };
+const rowActionDangerStyle: React.CSSProperties = { ...rowActionStyle, fontSize: '14px' };
 const repoListStyle: React.CSSProperties = { flex: 1, overflowY: 'auto', paddingBottom: '10px' };
 const inlineAddFormStyle: React.CSSProperties = { display: 'flex', gap: '5px', padding: '4px 14px 10px' };
 const inlineAddEnvFormStyle: React.CSSProperties = { display: 'flex', gap: '5px', padding: '4px 14px 8px 30px' };
