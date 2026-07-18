@@ -15,6 +15,9 @@ export function Sidebar() {
   const renamingRepoId = useVaultStore((s) => s.renamingRepoId);
   const renamingEnvId = useVaultStore((s) => s.renamingEnvId);
   const renameDraft = useVaultStore((s) => s.renameDraft);
+  const duplicatingEnvId = useVaultStore((s) => s.duplicatingEnvId);
+  const duplicateNewName = useVaultStore((s) => s.duplicateNewName);
+  const duplicateCopyValues = useVaultStore((s) => s.duplicateCopyValues);
 
   const toggleExpandRepo = useVaultStore((s) => s.toggleExpandRepo);
   const toggleAddRepo = useVaultStore((s) => s.toggleAddRepo);
@@ -32,6 +35,11 @@ export function Sidebar() {
   const submitRename = useVaultStore((s) => s.submitRename);
   const requestDeleteRepo = useVaultStore((s) => s.requestDeleteRepo);
   const requestDeleteEnv = useVaultStore((s) => s.requestDeleteEnv);
+  const startDuplicateEnv = useVaultStore((s) => s.startDuplicateEnv);
+  const cancelDuplicateEnv = useVaultStore((s) => s.cancelDuplicateEnv);
+  const setDuplicateNewName = useVaultStore((s) => s.setDuplicateNewName);
+  const toggleDuplicateCopyValues = useVaultStore((s) => s.toggleDuplicateCopyValues);
+  const submitDuplicateEnv = useVaultStore((s) => s.submitDuplicateEnv);
 
   return (
     <div style={sidebarStyle}>
@@ -124,6 +132,39 @@ export function Sidebar() {
                         />
                       );
                     }
+                    if (duplicatingEnvId === env.id) {
+                      return (
+                        <div key={env.id} style={duplicateFormStyle}>
+                          <input
+                            style={inlineAddInputStyle}
+                            placeholder="new-env-name"
+                            value={duplicateNewName}
+                            onChange={(e) => setDuplicateNewName(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') void submitDuplicateEnv();
+                              if (e.key === 'Escape') cancelDuplicateEnv();
+                            }}
+                            autoFocus
+                            spellCheck={false}
+                            autoComplete="off"
+                          />
+                          <label style={duplicateCheckboxLabelStyle}>
+                            <input
+                              type="checkbox"
+                              checked={duplicateCopyValues}
+                              onChange={toggleDuplicateCopyValues}
+                            />
+                            copy values
+                          </label>
+                          <button style={inlineAddConfirmStyle} onClick={() => void submitDuplicateEnv()}>
+                            Duplicate
+                          </button>
+                          <button style={inlineAddCancelStyle} onClick={cancelDuplicateEnv}>
+                            &times;
+                          </button>
+                        </div>
+                      );
+                    }
                     return (
                       <div
                         key={env.id}
@@ -139,6 +180,16 @@ export function Sidebar() {
                           {env.name}
                         </span>
                         <span style={envCountStyle}>{env.varCount}</span>
+                        <span
+                          style={rowActionStyle}
+                          title={`Duplicate ${env.name}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            startDuplicateEnv(env.id, env.name);
+                          }}
+                        >
+                          &#10697;
+                        </span>
                         <span
                           style={rowActionStyle}
                           title={`Rename ${env.name}`}
@@ -271,6 +322,21 @@ const rowActionDangerStyle: React.CSSProperties = { ...rowActionStyle, fontSize:
 const repoListStyle: React.CSSProperties = { flex: 1, overflowY: 'auto', paddingBottom: '10px' };
 const inlineAddFormStyle: React.CSSProperties = { display: 'flex', gap: '5px', padding: '4px 14px 10px' };
 const inlineAddEnvFormStyle: React.CSSProperties = { display: 'flex', gap: '5px', padding: '4px 14px 8px 30px' };
+const duplicateFormStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: '6px',
+  padding: '4px 14px 8px 30px',
+  flexWrap: 'wrap',
+};
+const duplicateCheckboxLabelStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: '4px',
+  fontSize: '11px',
+  color: 'var(--text-faint)',
+  whiteSpace: 'nowrap',
+};
 const inlineAddInputStyle: React.CSSProperties = {
   flex: 1,
   minWidth: 0,

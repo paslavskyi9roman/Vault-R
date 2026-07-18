@@ -1,6 +1,7 @@
 import { useVaultStore } from '../store/useVaultStore';
 import { envColor } from '../lib/envColor';
 import { VariablesTable } from './VariablesTable';
+import { LinkedFolders } from './LinkedFolders';
 
 export function MainPanel() {
   const repos = useVaultStore((s) => s.repos);
@@ -8,6 +9,7 @@ export function MainPanel() {
   const activeEnvId = useVaultStore((s) => s.activeEnvId);
   const variables = useVaultStore((s) => s.variables);
   const openHistory = useVaultStore((s) => s.openHistory);
+  const openCompare = useVaultStore((s) => s.openCompare);
   const copyVariable = useVaultStore((s) => s.copyVariable);
 
   const activeRepo = repos.find((r) => r.id === activeRepoId);
@@ -38,6 +40,8 @@ export function MainPanel() {
 
   const cliLine1 = `vault export ${activeRepo.name}/${activeEnv.name} > .env`;
   const cliLine2 = `vault run ${activeRepo.name}/${activeEnv.name} -- <command>`;
+  const requiredCount = variables.filter((v) => v.required).length;
+  const missingCount = variables.filter((v) => v.required && !v.value.trim()).length;
 
   return (
     <div style={mainStyle}>
@@ -49,7 +53,16 @@ export function MainPanel() {
         </div>
         <div style={varCountTextStyle}>
           {variables.length} variable{variables.length === 1 ? '' : 's'}
+          {requiredCount > 0 && (
+            <span style={missingCount > 0 ? requiredCountWarnStyle : requiredCountOkStyle}>
+              {' · '}
+              {missingCount > 0 ? `${missingCount}/${requiredCount} required missing` : `${requiredCount} required`}
+            </span>
+          )}
         </div>
+        <button style={historyBtnStyle} onClick={openCompare}>
+          Compare
+        </button>
         <button style={historyBtnStyle} onClick={() => void openHistory()}>
           History
         </button>
@@ -71,6 +84,8 @@ export function MainPanel() {
           </button>
         </div>
       </div>
+
+      <LinkedFolders envId={activeEnv.id} />
 
       <VariablesTable />
     </div>
@@ -121,6 +136,8 @@ const envBadgeStyle: React.CSSProperties = {
   padding: '3px 9px',
 };
 const varCountTextStyle: React.CSSProperties = { fontSize: '12px', color: 'var(--text-faint)', marginLeft: '2px' };
+const requiredCountOkStyle: React.CSSProperties = { color: 'var(--text-faint)' };
+const requiredCountWarnStyle: React.CSSProperties = { color: 'var(--danger)', fontWeight: 600 };
 const historyBtnStyle: React.CSSProperties = {
   marginLeft: 'auto',
   fontSize: '12.5px',

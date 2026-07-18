@@ -70,10 +70,24 @@ cargo build -p vault-cli --release
 vault init                      # first-time setup (prompts for a master password)
 vault list                      # repos + environments
 vault export api-gateway/local  # dotenv text to stdout (--file to write instead)
+vault export api-gateway/local --format json   # or yaml | shell | docker
 vault import api-gateway/local .env --create   # merge a file in (creates repo/env if missing)
 vault run api-gateway/local -- node server.js  # inject vars into a child process, no .env file needed
 vault get api-gateway/local DATABASE_URL
 vault set api-gateway/local NEW_KEY=value
+vault check api-gateway/local   # non-zero exit if a required variable is missing/empty (CI gate)
+vault diff api-gateway/local api-gateway/staging  # non-zero exit if the two environments differ
+
+# Link a directory to a repo/environment so the target argument above can be
+# omitted entirely -- the mapping lives in the vault, never in a file inside
+# the directory, so a cloned repo can never opt itself into your secrets.
+vault link api-gateway/local    # run from inside the project directory
+vault run -- node server.js     # resolves from the linked project
+vault unlink                    # remove the link for the current directory
+vault projects                  # list every linked directory
+
+vault gen --hex --length 32     # random secret to stdout (--base64 | --alnum | --words)
+vault env duplicate api-gateway/local staging --with-values  # copy an env's keys (blank values by default)
 
 vault rename api-gateway billing-api        # rename a repo…
 vault rename api-gateway/local dev          # …or an environment
@@ -88,6 +102,8 @@ vault passwd                                # change the master password
 vault recovery generate                     # create a recovery kit
 vault recovery unlock                       # forgot the password? use the kit
 vault recovery status
+
+vault completions powershell > vault-completion.ps1   # or bash | zsh | fish | elvish
 ```
 
 Add `--remember` to `vault init` to store the data key in the OS keychain so later commands skip the
@@ -95,6 +111,10 @@ password prompt.
 
 Every destructive command prompts before acting; pass `--yes` (`-y`) to skip the prompt in scripts. A
 prompt that cannot be answered — a closed stdin, for instance — counts as "no".
+
+`run`, `export`, `import`, `get`, and `set` all accept an optional `<repo>/<env>` target; when it is
+omitted they resolve from the current directory via `vault link` (walking up to the nearest linked
+ancestor), and fail with an actionable message if nothing here was ever linked.
 
 ## Development
 
@@ -104,4 +124,5 @@ cargo clippy --workspace --all-targets
 npx tsc --noEmit
 ```
 
-See [PLAN.md](PLAN.md) for the original design/implementation plan.
+See [.vscode/PLAN.md](.vscode/PLAN.md) for the original design/implementation plan and
+[.vscode/PHASE2.md](.vscode/PHASE2.md) for the plan that added the commands above.

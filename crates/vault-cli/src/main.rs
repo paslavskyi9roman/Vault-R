@@ -1,7 +1,7 @@
 mod auth;
 mod target;
 
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
 #[derive(Parser)]
@@ -9,6 +9,29 @@ use std::path::PathBuf;
 struct Cli {
     #[command(subcommand)]
     command: Command,
+}
+
+/// `--format` choices for `vault export`, mapped onto
+/// [`vault_core::dotenv::ExportFormat`].
+#[derive(Clone, Copy, ValueEnum)]
+enum ExportFormatArg {
+    Dotenv,
+    Json,
+    Yaml,
+    Shell,
+    Docker,
+}
+
+impl From<ExportFormatArg> for vault_core::dotenv::ExportFormat {
+    fn from(f: ExportFormatArg) -> Self {
+        match f {
+            ExportFormatArg::Dotenv => Self::Dotenv,
+            ExportFormatArg::Json => Self::Json,
+            ExportFormatArg::Yaml => Self::Yaml,
+            ExportFormatArg::Shell => Self::Shell,
+            ExportFormatArg::Docker => Self::Docker,
+        }
+    }
 }
 
 #[derive(Subcommand)]
@@ -23,40 +46,56 @@ enum Command {
     List,
     /// Print an environment's variables as .env text
     Export {
-        /// <repo>/<env>
-        target: String,
+        /// <repo>/<env>; omit to resolve from the current directory's linked project
+        target: Option<String>,
         /// Write to a file instead of stdout
         #[arg(long)]
         file: Option<PathBuf>,
+        /// Output format (default: dotenv)
+        #[arg(long, value_enum)]
+        format: Option<ExportFormatArg>,
     },
     /// Merge a .env file into an environment
     Import {
-        /// <repo>/<env>
-        target: String,
-        file: PathBuf,
+        /// [<repo>/<env>] <file> -- omit the target to resolve from the current directory
+        #[arg(num_args = 1..=2, required = true)]
+        args: Vec<String>,
         /// Create the repo/environment if they don't exist yet
         #[arg(long)]
         create: bool,
     },
     /// Run a command with the environment's variables injected
     Run {
-        /// <repo>/<env>
-        target: String,
+        /// [<repo>/<env>] -- <command> [args...] -- omit the target to resolve from the current directory
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
-        cmd: Vec<String>,
+        rest: Vec<String>,
     },
     /// Print a single variable's value
     Get {
-        /// <repo>/<env>
-        target: String,
-        key: String,
+        /// [<repo>/<env>] <key> -- omit the target to resolve from the current directory
+        #[arg(num_args = 1..=2, required = true)]
+        args: Vec<String>,
     },
     /// Create or update a single variable (respects linked-group propagation)
     Set {
+        /// [<repo>/<env>] <KEY=VALUE> -- omit the target to resolve from the current directory
+        #[arg(num_args = 1..=2, required = true)]
+        args: Vec<String>,
+    },
+    /// Link the current directory to a repo/environment, so future commands
+    /// here can omit the target
+    Link {
         /// <repo>/<env>
         target: String,
-        /// KEY=VALUE
-        assignment: String,
+    },
+    /// Remove the link for the current directory
+    Unlink,
+    /// List linked directories
+    Projects,
+    /// Environment-level operations
+    Env {
+        #[command(subcommand)]
+        command: EnvCommand,
     },
     /// Rename a repository or an environment
     Rename {
@@ -97,6 +136,42 @@ enum Command {
         #[command(subcommand)]
         command: RecoveryCommand,
     },
+    /// Fail (non-zero exit) if any required variable is missing or empty --
+    /// a CI gate
+    Check {
+        /// <repo>/<env>; omit to resolve from the current directory's linked project
+        target: Option<String>,
+    },
+    /// Compare two environments; exits non-zero if they differ (for CI gates)
+    Diff {
+        /// <repo>/<env>
+        target_a: String,
+        /// <repo>/<env>
+        target_b: String,
+    },
+    /// Generate a random secret and print it to stdout
+    Gen {
+        /// Hex characters (default)
+        #[arg(long, conflicts_with_all = ["base64", "alnum", "words"])]
+        hex: bool,
+        /// URL-safe base64 characters
+        #[arg(long, conflicts_with_all = ["hex", "alnum", "words"])]
+        base64: bool,
+        /// Letters and digits only
+        #[arg(long, conflicts_with_all = ["hex", "base64", "words"])]
+        alnum: bool,
+        /// A hyphen-joined passphrase
+        #[arg(long, conflicts_with_all = ["hex", "base64", "alnum"])]
+        words: bool,
+        /// Character count (or word count with --words)
+        #[arg(long)]
+        length: Option<usize>,
+    },
+    /// Print a shell completion script to stdout
+    Completions {
+        /// Which shell to generate completions for (PowerShell is the primary platform)
+        shell: clap_complete::Shell,
+    },
 }
 
 #[derive(Subcommand)]
@@ -107,6 +182,19 @@ enum RecoveryCommand {
     Status,
     /// Unlock with a recovery code and set a new master password
     Unlock,
+}
+
+#[derive(Subcommand)]
+enum EnvCommand {
+    /// Copy an environment's keys into a new one in the same repo
+    Duplicate {
+        /// <repo>/<env>
+        target: String,
+        new_env: String,
+        /// Also copy values (default is to copy keys with blank values)
+        #[arg(long)]
+        with_values: bool,
+    },
 }
 
 /// Asks for a yes/no on stdin. Returns `false` on anything but an explicit yes,
@@ -121,6 +209,48 @@ fn confirm(prompt: &str) -> bool {
         return false;
     }
     matches!(answer.trim().to_lowercase().as_str(), "y" | "yes")
+}
+
+/// Splits everything typed after `run` into an optional explicit target and
+/// the child command. The first token is tried against `try_target` unless
+/// it is a literal `--`; if that resolves (right shape *and* an actual
+/// repo/env), it is consumed as the target. Otherwise it is left in place as
+/// the command's own first argument -- so a command whose first token
+/// happens to contain a slash (`node_modules/.bin/eslint`) is never silently
+/// swallowed as a bogus target. A leading `--` separator, if present after
+/// the target (or at the very start), is stripped either way.
+fn split_run_args<T>(
+    mut rest: Vec<String>,
+    try_target: impl FnOnce(&str) -> Option<T>,
+) -> (Option<T>, Vec<String>) {
+    let explicit = if rest.first().map(String::as_str) != Some("--") {
+        rest.first().and_then(|t| try_target(t))
+    } else {
+        None
+    };
+    if explicit.is_some() {
+        rest.remove(0);
+    }
+    if rest.first().map(String::as_str) == Some("--") {
+        rest.remove(0);
+    }
+    (explicit, rest)
+}
+
+/// Exits with the child's own exit code, or -- on Unix, where a process
+/// killed by a signal reports no exit code at all -- the conventional
+/// `128 + signal` shells use, so a `vault run`-wrapped command that was
+/// interrupted (Ctrl+C, a timeout, etc.) is reported the same way running
+/// it directly would have been.
+fn exit_with_child_status(status: std::process::ExitStatus) -> ! {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        if let Some(signal) = status.signal() {
+            std::process::exit(128 + signal);
+        }
+    }
+    std::process::exit(status.code().unwrap_or(1));
 }
 
 fn main() {
@@ -150,50 +280,70 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         }
-        Command::Export { target, file } => {
+        Command::Export { target, file, format } => {
             let vault = auth::unlock()?;
-            let (_, env) = target::resolve_env(&vault, &target, false)?;
-            let text = vault.export_env_text(&env.id)?;
+            let (_, env) = target::resolve_target_or_cwd(&vault, target.as_deref(), false)?;
+            let format = format.unwrap_or(ExportFormatArg::Dotenv).into();
+            let text = vault.export_env_as(&env.id, format)?;
             match file {
                 Some(path) => std::fs::write(&path, text)?,
                 None => print!("{text}"),
             }
         }
-        Command::Import { target, file, create } => {
+        Command::Import { args, create } => {
+            let (target, file) = match args.as_slice() {
+                [file] => (None, file.clone()),
+                [t, file] => (Some(t.clone()), file.clone()),
+                _ => return Err("usage: vault import [<repo>/<env>] <file>".into()),
+            };
             let vault = auth::unlock()?;
-            let (_, env) = target::resolve_env(&vault, &target, create)?;
+            let (repo, env) = target::resolve_target_or_cwd(&vault, target.as_deref(), create)?;
             let text = std::fs::read_to_string(&file)?;
             let count = vault.import_env_text(&env.id, &text)?;
-            println!("Imported {count} variable(s) into {target}.");
+            println!("Imported {count} variable(s) into {}/{}.", repo.name, env.name);
         }
-        Command::Run { target, mut cmd } => {
+        Command::Run { rest } => {
             let vault = auth::unlock()?;
-            let (_, env) = target::resolve_env(&vault, &target, false)?;
-            if cmd.first().map(String::as_str) == Some("--") {
-                cmd.remove(0);
-            }
-            let Some((program, args)) = cmd.split_first() else {
-                return Err("usage: vault run <repo>/<env> -- <command> [args...]".into());
+            let (explicit, rest) =
+                split_run_args(rest, |t| target::resolve_env(&vault, t, false).ok());
+            let (_, env) = match explicit {
+                Some(found) => found,
+                None => target::resolve_cwd(&vault)?,
+            };
+            let Some((program, args)) = rest.split_first() else {
+                return Err("usage: vault run [<repo>/<env>] -- <command> [args...]".into());
             };
             let vars = vault.list_variables(&env.id)?;
+            // Inherits stdin/stdout/stderr (the default for `.status()`), so
+            // the child's output streams straight through with no buffering.
             let status = std::process::Command::new(program)
                 .args(args)
                 .envs(vars.into_iter().map(|v| (v.key, v.value)))
                 .status()?;
-            std::process::exit(status.code().unwrap_or(1));
+            exit_with_child_status(status);
         }
-        Command::Get { target, key } => {
+        Command::Get { args } => {
+            let (target, key) = match args.as_slice() {
+                [key] => (None, key.clone()),
+                [t, key] => (Some(t.clone()), key.clone()),
+                _ => return Err("usage: vault get [<repo>/<env>] <key>".into()),
+            };
             let vault = auth::unlock()?;
-            let (_, env) = target::resolve_env(&vault, &target, false)?;
+            let (repo, env) = target::resolve_target_or_cwd(&vault, target.as_deref(), false)?;
             let vars = vault.list_variables(&env.id)?;
             match vars.into_iter().find(|v| v.key == key) {
                 Some(v) => println!("{}", v.value),
-                None => return Err(format!("no such key '{key}' in {target}").into()),
+                None => return Err(format!("no such key '{key}' in {}/{}", repo.name, env.name).into()),
             }
         }
-        Command::Set { target, assignment } => {
+        Command::Set { args } => {
+            let (target, assignment) = match args.as_slice() {
+                [assignment] => (None, assignment.clone()),
+                [t, assignment] => (Some(t.clone()), assignment.clone()),
+                _ => return Err("usage: vault set [<repo>/<env>] <KEY=VALUE>".into()),
+            };
             let vault = auth::unlock()?;
-            let (_, env) = target::resolve_env(&vault, &target, true)?;
+            let (repo, env) = target::resolve_target_or_cwd(&vault, target.as_deref(), true)?;
             let (key, value) = assignment.split_once('=').ok_or("expected KEY=VALUE")?;
             let existing = vault
                 .list_variables(&env.id)?
@@ -205,8 +355,39 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     vault.add_variable(&env.id, key, value)?;
                 }
             }
-            println!("Set {key} in {target}.");
+            println!("Set {key} in {}/{}.", repo.name, env.name);
         }
+        Command::Link { target } => {
+            let vault = auth::unlock()?;
+            let (repo, env) = target::resolve_env(&vault, &target, false)?;
+            let cwd = std::env::current_dir()?;
+            vault.link_project(&cwd, &env.id)?;
+            println!("Linked {} to {}/{}.", cwd.display(), repo.name, env.name);
+        }
+        Command::Unlink => {
+            let vault = auth::unlock()?;
+            let cwd = std::env::current_dir()?;
+            vault.unlink_project(&cwd)?;
+            println!("Unlinked {}.", cwd.display());
+        }
+        Command::Projects => {
+            let vault = auth::unlock()?;
+            let projects = vault.list_projects()?;
+            if projects.is_empty() {
+                println!("(no linked projects yet)");
+            }
+            for p in projects {
+                println!("{}  ->  {}/{}", p.path, p.repo_name, p.env_name);
+            }
+        }
+        Command::Env { command } => match command {
+            EnvCommand::Duplicate { target, new_env, with_values } => {
+                let vault = auth::unlock()?;
+                let (repo, env) = target::resolve_env(&vault, &target, false)?;
+                vault.duplicate_environment(&env.id, &new_env, with_values)?;
+                println!("Duplicated {}/{} to {}/{}.", repo.name, env.name, repo.name, new_env);
+            }
+        },
         Command::Rename { target, new_name } => {
             let vault = auth::unlock()?;
             let (repo, env) = target::resolve_repo_or_env(&vault, &target)?;
@@ -349,6 +530,153 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 println!("and anyone holding it can read every secret in this vault.");
             }
         },
+        Command::Check { target } => {
+            let vault = auth::unlock()?;
+            let (repo, env) = target::resolve_target_or_cwd(&vault, target.as_deref(), false)?;
+            let missing = vault.required_and_empty(&env.id)?;
+            if missing.is_empty() {
+                println!("All required variables are set in {}/{}.", repo.name, env.name);
+                return Ok(());
+            }
+            eprintln!("Missing required variable(s) in {}/{}:", repo.name, env.name);
+            for v in &missing {
+                eprintln!("  {}", v.key);
+            }
+            std::process::exit(1);
+        }
+        Command::Diff { target_a, target_b } => {
+            let vault = auth::unlock()?;
+            let (_, env_a) = target::resolve_env(&vault, &target_a, false)?;
+            let (_, env_b) = target::resolve_env(&vault, &target_b, false)?;
+            let rows = vault.diff_environments(&env_a.id, &env_b.id)?;
+            if rows.is_empty() {
+                println!("{target_a} and {target_b} match.");
+                return Ok(());
+            }
+            for row in &rows {
+                match row.kind.as_str() {
+                    "added" => println!(
+                        "+ {} (only in {target_b}) = {}",
+                        row.key,
+                        row.new_value.as_deref().unwrap_or("")
+                    ),
+                    "removed" => println!(
+                        "- {} (only in {target_a}) = {}",
+                        row.key,
+                        row.old_value.as_deref().unwrap_or("")
+                    ),
+                    "changed" => println!(
+                        "~ {} : {} -> {}",
+                        row.key,
+                        row.old_value.as_deref().unwrap_or(""),
+                        row.new_value.as_deref().unwrap_or("")
+                    ),
+                    _ => {}
+                }
+            }
+            std::process::exit(1);
+        }
+        Command::Gen { hex: _, base64, alnum, words, length } => {
+            let kind = if base64 {
+                vault_core::crypto::SecretKind::Base64Url
+            } else if alnum {
+                vault_core::crypto::SecretKind::Alphanumeric
+            } else if words {
+                vault_core::crypto::SecretKind::Passphrase
+            } else {
+                vault_core::crypto::SecretKind::Hex
+            };
+            let default_len = if words { 5 } else { 32 };
+            let secret = vault_core::crypto::generate_secret(kind, length.unwrap_or(default_len))?;
+            println!("{secret}");
+        }
+        Command::Completions { shell } => {
+            let mut cmd = Cli::command();
+            let name = cmd.get_name().to_string();
+            clap_complete::generate(shell, &mut cmd, name, &mut std::io::stdout());
+        }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod arg_parsing_tests {
+    use super::*;
+
+    fn strs(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn run_with_explicit_separator_and_no_target() {
+        let (explicit, cmd): (Option<()>, _) = split_run_args(strs(&["--", "npm", "start"]), |_| None);
+        assert!(explicit.is_none());
+        assert_eq!(cmd, strs(&["npm", "start"]));
+    }
+
+    #[test]
+    fn run_with_an_explicit_target_that_resolves() {
+        let rest = strs(&["api-gateway/local", "--", "npm", "start"]);
+        let (explicit, cmd) =
+            split_run_args(rest, |t| (t == "api-gateway/local").then(|| t.to_string()));
+        assert_eq!(explicit.as_deref(), Some("api-gateway/local"));
+        assert_eq!(cmd, strs(&["npm", "start"]));
+    }
+
+    #[test]
+    fn run_with_no_target_and_no_separator() {
+        let (explicit, cmd): (Option<()>, _) = split_run_args(strs(&["npm", "start"]), |_| None);
+        assert!(explicit.is_none());
+        assert_eq!(cmd, strs(&["npm", "start"]));
+    }
+
+    #[test]
+    fn a_slash_shaped_first_command_token_is_not_mistaken_for_a_target() {
+        // no resolver ever matches -- simulates "no such repo/env" -- so a
+        // command whose own first token contains a slash must fall through
+        // to the command rather than being silently swallowed as a target.
+        let rest = strs(&["node_modules/.bin/eslint", "."]);
+        let (explicit, cmd): (Option<()>, _) = split_run_args(rest, |_| None);
+        assert!(explicit.is_none());
+        assert_eq!(cmd, strs(&["node_modules/.bin/eslint", "."]));
+    }
+
+    #[test]
+    fn cli_parses_run_with_no_arguments_at_all() {
+        let cli = Cli::try_parse_from(["vault", "run"]).unwrap();
+        assert!(matches!(cli.command, Command::Run { rest } if rest.is_empty()));
+    }
+
+    #[test]
+    fn cli_parses_get_with_one_or_two_positional_args() {
+        let cli = Cli::try_parse_from(["vault", "get", "KEY"]).unwrap();
+        assert!(matches!(cli.command, Command::Get { args } if args == strs(&["KEY"])));
+
+        let cli = Cli::try_parse_from(["vault", "get", "repo/env", "KEY"]).unwrap();
+        assert!(matches!(cli.command, Command::Get { args } if args == strs(&["repo/env", "KEY"])));
+
+        assert!(Cli::try_parse_from(["vault", "get"]).is_err());
+        assert!(Cli::try_parse_from(["vault", "get", "a", "b", "c"]).is_err());
+    }
+
+    #[test]
+    fn cli_parses_set_and_import_with_one_or_two_positional_args() {
+        let cli = Cli::try_parse_from(["vault", "set", "KEY=value"]).unwrap();
+        assert!(matches!(cli.command, Command::Set { args } if args == strs(&["KEY=value"])));
+
+        let cli = Cli::try_parse_from(["vault", "import", "repo/env", "file.env"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Import { args, create: false } if args == strs(&["repo/env", "file.env"])
+        ));
+    }
+
+    #[test]
+    fn cli_parses_export_with_an_optional_target() {
+        let cli = Cli::try_parse_from(["vault", "export"]).unwrap();
+        assert!(matches!(cli.command, Command::Export { target: None, file: None, .. }));
+
+        let cli = Cli::try_parse_from(["vault", "export", "repo/env"]).unwrap();
+        assert!(matches!(cli.command, Command::Export { target: Some(t), .. } if t == "repo/env"));
+    }
 }

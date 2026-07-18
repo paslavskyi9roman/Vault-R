@@ -2,12 +2,14 @@ use crate::db::Vault;
 use crate::dotenv::{parse_env_text, serialize_env};
 use crate::error::{Result, VaultError};
 use crate::models::{
-    DiffRow, Environment, EnvironmentSummary, GroupMember, Member, Repo, RepoSummary, SearchResult,
-    Snapshot, SnapshotVariable, SnapshotWithStats, Variable, VariableWithUsage,
+    DiffRow, Environment, EnvironmentSummary, GroupMember, Member, Project, ProjectInfo, Repo,
+    RepoSummary, SearchResult, Snapshot, SnapshotVariable, SnapshotWithStats, UnlinkedMatch,
+    Variable, VariableWithUsage,
 };
 use chrono::Utc;
 use rusqlite::{params, OptionalExtension};
 use std::collections::HashMap;
+use std::path::Path;
 use uuid::Uuid;
 
 const MAX_SNAPSHOTS_PER_ENV: i64 = 100;
@@ -113,6 +115,8 @@ fn row_to_variable(row: &rusqlite::Row) -> rusqlite::Result<Variable> {
         key: row.get(2)?,
         value: row.get(3)?,
         group_id: row.get(4)?,
+        description: row.get(5)?,
+        required: row.get::<_, i64>(6)? != 0,
     })
 }
 
@@ -317,6 +321,332 @@ impl Vault {
         Ok(())
     }
 
+    /// Creates `new_name` in the same repo as `env_id` and copies every key
+    /// into it. Values are copied only if `copy_values` is true; otherwise
+    /// the duplicate starts with the same keys but blank values, which is
+    /// the safer default when the source holds live credentials -- a
+    /// duplicate should be a deliberate choice to carry secrets into a new
+    /// environment, not a side effect of wanting the same key list. Copied
+    /// variables are not linked to their originals; link them explicitly via
+    /// [`Vault::link_variables`] if that is what's wanted.
+    pub fn duplicate_environment(
+        &self,
+        env_id: &str,
+        new_name: &str,
+        copy_values: bool,
+    ) -> Result<Environment> {
+        let (_, source_env) = self
+            .find_environment(env_id)?
+            .ok_or_else(|| VaultError::Missing(format!("environment {env_id}")))?;
+        let new_env = self.create_environment(&source_env.repo_id, new_name)?;
+
+        let source_vars = self.list_variables(env_id)?;
+        if !source_vars.is_empty() {
+            let now_s = now();
+            let tx = self.conn.unchecked_transaction()?;
+            for v in &source_vars {
+                let id = new_id();
+                let value = if copy_values { v.value.as_str() } else { "" };
+                tx.execute(
+                    "INSERT INTO variables (id, env_id, key, value, group_id, created_at, updated_at)
+                     VALUES (?1, ?2, ?3, ?4, NULL, ?5, ?5)",
+                    params![id, new_env.id, v.key, value, now_s],
+                )?;
+            }
+            tx.commit()?;
+
+            self.snapshot_env_internal(&new_env.id, &format!("Duplicated from {}", source_env.name))?;
+            self.persist()?;
+        }
+        Ok(new_env)
+    }
+
+    // ---------------------------------------------------------------
+    // Projects: directories linked to a repo/environment
+    // ---------------------------------------------------------------
+
+    fn find_environment(&self, env_id: &str) -> Result<Option<(Repo, Environment)>> {
+        self.conn
+            .query_row(
+                "SELECT e.id, e.repo_id, e.name, r.name, r.sort_order
+                 FROM environments e JOIN repos r ON r.id = e.repo_id
+                 WHERE e.id = ?1",
+                params![env_id],
+                |r| {
+                    let env_id: String = r.get(0)?;
+                    let repo_id: String = r.get(1)?;
+                    let env_name: String = r.get(2)?;
+                    let repo_name: String = r.get(3)?;
+                    let sort_order: i64 = r.get(4)?;
+                    Ok((
+                        Repo {
+                            id: repo_id.clone(),
+                            name: repo_name,
+                            sort_order,
+                        },
+                        Environment {
+                            id: env_id,
+                            repo_id,
+                            name: env_name,
+                        },
+                    ))
+                },
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
+    /// Records `path` as linked to `env_id`, so future lookups from within it
+    /// (or a subdirectory of it) resolve to that environment without naming
+    /// it explicitly. Relinking an already-linked path just repoints it.
+    /// `path` is canonicalized before storing -- the security guarantee this
+    /// depends on is that only a path that genuinely exists and was
+    /// deliberately linked can ever resolve, never a value read out of a
+    /// file inside the directory itself.
+    pub fn link_project(&self, path: &Path, env_id: &str) -> Result<Project> {
+        let canonical = path.canonicalize()?;
+        let path_str = canonical.to_string_lossy().into_owned();
+        let id = new_id();
+        let now_s = now();
+        self.conn
+            .execute(
+                "INSERT INTO projects (id, path, env_id, created_at) VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(path) DO UPDATE SET env_id = excluded.env_id",
+                params![id, path_str, env_id, now_s],
+            )
+            .map_err(|e| map_unique(e, "project"))?;
+        self.persist()?;
+        self.conn
+            .query_row(
+                "SELECT id, path, env_id, created_at FROM projects WHERE path = ?1",
+                params![path_str],
+                |r| {
+                    Ok(Project {
+                        id: r.get(0)?,
+                        path: r.get(1)?,
+                        env_id: r.get(2)?,
+                        created_at: r.get(3)?,
+                    })
+                },
+            )
+            .map_err(Into::into)
+    }
+
+    /// Removes the link for `path`. Falls back to comparing the raw,
+    /// uncanonicalized path text if canonicalization fails (the directory no
+    /// longer exists) -- a stale link should still be removable.
+    pub fn unlink_project(&self, path: &Path) -> Result<()> {
+        let path_str = path
+            .canonicalize()
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_else(|_| path.to_string_lossy().into_owned());
+        let affected = self
+            .conn
+            .execute("DELETE FROM projects WHERE path = ?1", params![path_str])?;
+        if affected == 0 {
+            return Err(VaultError::Missing(format!("linked project at {path_str}")));
+        }
+        self.persist()?;
+        Ok(())
+    }
+
+    /// Resolves `cwd` to a linked repo/environment by walking up through its
+    /// ancestors, nearest first, so a subdirectory of a linked project
+    /// resolves the same way the linked directory itself does. Returns
+    /// `None` if neither `cwd` nor any parent was ever linked -- a cloned
+    /// repository that merely contains a marker file naming a target is not
+    /// enough on its own (see the module-level docs on why the mapping lives
+    /// in the vault, not a file in the directory).
+    pub fn resolve_project(&self, cwd: &Path) -> Result<Option<(Repo, Environment)>> {
+        let Ok(canonical) = cwd.canonicalize() else {
+            return Ok(None);
+        };
+        let mut candidate = Some(canonical.as_path());
+        while let Some(dir) = candidate {
+            let dir_str = dir.to_string_lossy().into_owned();
+            let env_id: Option<String> = self
+                .conn
+                .query_row(
+                    "SELECT env_id FROM projects WHERE path = ?1",
+                    params![dir_str],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            if let Some(env_id) = env_id {
+                if let Some(found) = self.find_environment(&env_id)? {
+                    return Ok(Some(found));
+                }
+            }
+            candidate = dir.parent();
+        }
+        Ok(None)
+    }
+
+    /// All linked projects, newest first. A link whose directory no longer
+    /// exists on disk is pruned here rather than returned, so the list never
+    /// shows folders that have since been deleted or moved.
+    pub fn list_projects(&self) -> Result<Vec<ProjectInfo>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT p.id, p.path, p.env_id, p.created_at, r.name, e.name
+             FROM projects p
+             JOIN environments e ON e.id = p.env_id
+             JOIN repos r ON r.id = e.repo_id
+             ORDER BY p.created_at DESC",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok(ProjectInfo {
+                id: r.get(0)?,
+                path: r.get(1)?,
+                env_id: r.get(2)?,
+                created_at: r.get(3)?,
+                repo_name: r.get(4)?,
+                env_name: r.get(5)?,
+            })
+        })?;
+
+        let mut live = Vec::new();
+        let mut stale_ids = Vec::new();
+        for row in rows {
+            let p = row?;
+            if Path::new(&p.path).exists() {
+                live.push(p);
+            } else {
+                stale_ids.push(p.id.clone());
+            }
+        }
+        if !stale_ids.is_empty() {
+            for id in &stale_ids {
+                self.conn.execute("DELETE FROM projects WHERE id = ?1", params![id])?;
+            }
+            self.persist()?;
+        }
+        Ok(live)
+    }
+
+    // ---------------------------------------------------------------
+    // Environment diff and sync
+    // ---------------------------------------------------------------
+
+    /// Compares two environments' current variables by key: `added` means
+    /// present only in `env_b`, `removed` means present only in `env_a`,
+    /// `changed` means both have the key but with different values. Reuses
+    /// [`diff_variable_sets`], the same machinery history diffing uses,
+    /// by projecting each environment's live variables into the same shape.
+    pub fn diff_environments(&self, env_a: &str, env_b: &str) -> Result<Vec<DiffRow>> {
+        let to_snapshot_vars = |vars: Vec<Variable>| -> Vec<SnapshotVariable> {
+            vars.into_iter()
+                .map(|v| SnapshotVariable {
+                    key: v.key,
+                    value: v.value,
+                    group_id: v.group_id,
+                })
+                .collect()
+        };
+        let a = to_snapshot_vars(self.list_variables(env_a)?);
+        let b = to_snapshot_vars(self.list_variables(env_b)?);
+        Ok(diff_variable_sets(&a, &b))
+    }
+
+    /// Copies one variable's value into `target_env_id`. If the target
+    /// already has a variable under the same key, this is routed through the
+    /// normal value-update path -- so if that variable belongs to a link
+    /// group, the whole group still propagates. Otherwise a new, unlinked
+    /// variable is created in the target.
+    pub fn copy_variable_to_env(&self, var_id: &str, target_env_id: &str) -> Result<()> {
+        let source = self.get_variable(var_id)?;
+        let existing = self
+            .list_variables(target_env_id)?
+            .into_iter()
+            .find(|v| v.key == source.key);
+        match existing {
+            Some(v) => self.update_variable_value(&v.id, &source.value),
+            None => self
+                .add_variable(target_env_id, &source.key, &source.value)
+                .map(|_| ()),
+        }
+    }
+
+    /// As [`Vault::copy_variable_to_env`], but looks the source variable up
+    /// by key within `source_env_id` instead of requiring its id -- callers
+    /// that only have a key (like the compare view, working from
+    /// [`DiffRow`]s) do not need to look up an id first.
+    pub fn copy_key_to_env(&self, source_env_id: &str, target_env_id: &str, key: &str) -> Result<()> {
+        let source = self
+            .list_variables(source_env_id)?
+            .into_iter()
+            .find(|v| v.key == key)
+            .ok_or_else(|| VaultError::Missing(format!("{key} in this environment")))?;
+        self.copy_variable_to_env(&source.id, target_env_id)
+    }
+
+    /// Copies every key `source_env_id` has that `target_env_id` lacks,
+    /// leaving `target_env_id`'s existing values untouched. All copies land
+    /// in one transaction and one history snapshot, rather than one per key.
+    /// Returns how many keys were copied.
+    pub fn copy_missing_to_env(&self, source_env_id: &str, target_env_id: &str) -> Result<usize> {
+        let source_vars = self.list_variables(source_env_id)?;
+        let existing_keys: std::collections::HashSet<String> = self
+            .list_variables(target_env_id)?
+            .into_iter()
+            .map(|v| v.key)
+            .collect();
+        let missing: Vec<&Variable> = source_vars
+            .iter()
+            .filter(|v| !existing_keys.contains(&v.key))
+            .collect();
+        if missing.is_empty() {
+            return Ok(0);
+        }
+
+        let now_s = now();
+        let tx = self.conn.unchecked_transaction()?;
+        for v in &missing {
+            let id = new_id();
+            tx.execute(
+                "INSERT INTO variables (id, env_id, key, value, group_id, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, NULL, ?5, ?5)",
+                params![id, target_env_id, v.key, v.value, now_s],
+            )?;
+        }
+        tx.commit()?;
+
+        self.snapshot_env_internal(
+            target_env_id,
+            &format!(
+                "Copied {} missing variable{} from another environment",
+                missing.len(),
+                if missing.len() == 1 { "" } else { "s" }
+            ),
+        )?;
+        self.persist()?;
+        Ok(missing.len())
+    }
+
+    /// Same-key, same-value pairs between two environments that are not
+    /// already part of a link group -- a discovery hook for the compare
+    /// view's "link these?" prompt. A variable that is already in *any*
+    /// group is excluded, not just one linked to its counterpart here.
+    pub fn unlinked_identical_pairs(&self, env_a: &str, env_b: &str) -> Result<Vec<UnlinkedMatch>> {
+        let vars_a = self.list_variables(env_a)?;
+        let vars_b = self.list_variables(env_b)?;
+        let mut out = Vec::new();
+        for a in &vars_a {
+            if a.group_id.is_some() {
+                continue;
+            }
+            for b in &vars_b {
+                if b.group_id.is_none() && a.key == b.key && a.value == b.value {
+                    out.push(UnlinkedMatch {
+                        key: a.key.clone(),
+                        var_a: a.clone(),
+                        var_b: b.clone(),
+                    });
+                }
+            }
+        }
+        Ok(out)
+    }
+
     // ---------------------------------------------------------------
     // Variables
     // ---------------------------------------------------------------
@@ -324,7 +654,7 @@ impl Vault {
     fn get_variable(&self, id: &str) -> Result<Variable> {
         self.conn
             .query_row(
-                "SELECT id, env_id, key, value, group_id FROM variables WHERE id = ?1",
+                "SELECT id, env_id, key, value, group_id, description, required FROM variables WHERE id = ?1",
                 params![id],
                 row_to_variable,
             )
@@ -334,7 +664,7 @@ impl Vault {
 
     pub fn list_variables(&self, env_id: &str) -> Result<Vec<Variable>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, env_id, key, value, group_id FROM variables WHERE env_id = ?1 ORDER BY created_at",
+            "SELECT id, env_id, key, value, group_id, description, required FROM variables WHERE env_id = ?1 ORDER BY created_at",
         )?;
         let rows = stmt.query_map(params![env_id], row_to_variable)?;
         let mut out = Vec::new();
@@ -386,6 +716,8 @@ impl Vault {
             key: key.to_string(),
             value: value.to_string(),
             group_id: None,
+            description: None,
+            required: false,
         })
     }
 
@@ -456,6 +788,40 @@ impl Vault {
         Ok(())
     }
 
+    /// Sets a variable's documentation and whether `vault check` should
+    /// treat it as required. Deliberately not routed through the link-group
+    /// propagation path: groups sync *values*, exactly as key renames do --
+    /// descriptions and the required flag are per-environment documentation,
+    /// not part of what a link keeps in sync. Not snapshotted either, since
+    /// history is about value changes and restoring a snapshot does not
+    /// touch metadata.
+    pub fn set_variable_metadata(
+        &self,
+        var_id: &str,
+        description: Option<&str>,
+        required: bool,
+    ) -> Result<()> {
+        let affected = self.conn.execute(
+            "UPDATE variables SET description = ?1, required = ?2 WHERE id = ?3",
+            params![description, required as i64, var_id],
+        )?;
+        if affected == 0 {
+            return Err(VaultError::Missing(format!("variable {var_id}")));
+        }
+        self.persist()?;
+        Ok(())
+    }
+
+    /// Variables in `env_id` marked required whose value is empty (after
+    /// trimming) -- what `vault check` gates on.
+    pub fn required_and_empty(&self, env_id: &str) -> Result<Vec<Variable>> {
+        Ok(self
+            .list_variables(env_id)?
+            .into_iter()
+            .filter(|v| v.required && v.value.trim().is_empty())
+            .collect())
+    }
+
     pub fn delete_variable(&self, var_id: &str) -> Result<()> {
         let var = self.get_variable(var_id)?;
         self.conn
@@ -464,6 +830,139 @@ impl Vault {
             self.cleanup_group_if_singleton(group_id)?;
         }
         self.snapshot_env_internal(&var.env_id, &format!("Deleted {}", var.key))?;
+        self.persist()?;
+        Ok(())
+    }
+
+    /// Deletes every id in `var_ids` in one transaction, then snapshots each
+    /// *affected environment* once -- not once per variable, which would
+    /// flood the 100-snapshot-per-environment cap on anything but a small
+    /// selection and destroy the very history a bulk delete might need to be
+    /// undone from. Unknown ids are skipped rather than erroring, so a
+    /// stale selection in the UI can't abort the rest of the batch.
+    pub fn delete_variables(&self, var_ids: &[String]) -> Result<()> {
+        if var_ids.is_empty() {
+            return Ok(());
+        }
+        let mut counts: HashMap<String, i64> = HashMap::new();
+
+        let tx = self.conn.unchecked_transaction()?;
+        for id in var_ids {
+            let env_id: Option<String> = tx
+                .query_row("SELECT env_id FROM variables WHERE id = ?1", params![id], |r| r.get(0))
+                .optional()?;
+            let Some(env_id) = env_id else { continue };
+            tx.execute("DELETE FROM variables WHERE id = ?1", params![id])?;
+            *counts.entry(env_id).or_insert(0) += 1;
+        }
+        let dissolved_envs = prune_orphan_groups(&tx)?;
+        tx.commit()?;
+
+        for (env_id, count) in &counts {
+            self.snapshot_env_internal(
+                env_id,
+                &format!("Deleted {count} variable{}", if *count == 1 { "" } else { "s" }),
+            )?;
+        }
+        for env_id in &dissolved_envs {
+            if !counts.contains_key(env_id) {
+                self.snapshot_env_internal(env_id, "Link group dissolved")?;
+            }
+        }
+        self.persist()?;
+        Ok(())
+    }
+
+    /// Moves each of `var_ids` into `target_env_id`: a key that already
+    /// exists there is updated in place (propagating through its link group,
+    /// if any, the same as a normal value edit); otherwise a new, unlinked
+    /// variable is created. The original rows are then removed. A moved
+    /// variable does not carry its own link-group membership to the new
+    /// row -- relocating a variable to a different environment is a
+    /// structural change, not something that should silently keep syncing
+    /// with wherever it used to live; re-link explicitly if that's wanted.
+    /// One snapshot lands on each affected source environment and one on
+    /// the target, not one per variable moved.
+    pub fn move_variables(&self, var_ids: &[String], target_env_id: &str) -> Result<()> {
+        if var_ids.is_empty() {
+            return Ok(());
+        }
+        let now_s = now();
+        let mut source_counts: HashMap<String, i64> = HashMap::new();
+        let mut moved = 0i64;
+
+        let tx = self.conn.unchecked_transaction()?;
+        for id in var_ids {
+            let row: Option<(String, String, String)> = tx
+                .query_row(
+                    "SELECT env_id, key, value FROM variables WHERE id = ?1",
+                    params![id],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                )
+                .optional()?;
+            let Some((source_env_id, key, value)) = row else { continue };
+            if source_env_id == target_env_id {
+                continue;
+            }
+
+            let existing_target_id: Option<String> = tx
+                .query_row(
+                    "SELECT id FROM variables WHERE env_id = ?1 AND key = ?2",
+                    params![target_env_id, key],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            match existing_target_id {
+                Some(target_var_id) => {
+                    let group_id: Option<String> = tx.query_row(
+                        "SELECT group_id FROM variables WHERE id = ?1",
+                        params![target_var_id],
+                        |r| r.get(0),
+                    )?;
+                    match &group_id {
+                        Some(g) => tx.execute(
+                            "UPDATE variables SET value = ?1, updated_at = ?2 WHERE group_id = ?3",
+                            params![value, now_s, g],
+                        )?,
+                        None => tx.execute(
+                            "UPDATE variables SET value = ?1, updated_at = ?2 WHERE id = ?3",
+                            params![value, now_s, target_var_id],
+                        )?,
+                    };
+                }
+                None => {
+                    let new_var_id = new_id();
+                    tx.execute(
+                        "INSERT INTO variables (id, env_id, key, value, group_id, created_at, updated_at)
+                         VALUES (?1, ?2, ?3, ?4, NULL, ?5, ?5)",
+                        params![new_var_id, target_env_id, key, value, now_s],
+                    )?;
+                }
+            }
+            tx.execute("DELETE FROM variables WHERE id = ?1", params![id])?;
+            *source_counts.entry(source_env_id).or_insert(0) += 1;
+            moved += 1;
+        }
+        let dissolved_envs = prune_orphan_groups(&tx)?;
+        tx.commit()?;
+
+        for (env_id, count) in &source_counts {
+            self.snapshot_env_internal(
+                env_id,
+                &format!("Moved {count} variable{} out", if *count == 1 { "" } else { "s" }),
+            )?;
+        }
+        if moved > 0 {
+            self.snapshot_env_internal(
+                target_env_id,
+                &format!("Moved {moved} variable{} in", if moved == 1 { "" } else { "s" }),
+            )?;
+        }
+        for env_id in &dissolved_envs {
+            if !source_counts.contains_key(env_id) && env_id != target_env_id {
+                self.snapshot_env_internal(env_id, "Link group dissolved")?;
+            }
+        }
         self.persist()?;
         Ok(())
     }
@@ -503,7 +1002,7 @@ impl Vault {
 
         let primary: Variable = tx
             .query_row(
-                "SELECT id, env_id, key, value, group_id FROM variables WHERE id = ?1",
+                "SELECT id, env_id, key, value, group_id, description, required FROM variables WHERE id = ?1",
                 params![var_ids[0]],
                 row_to_variable,
             )
@@ -571,7 +1070,7 @@ impl Vault {
 
     pub fn group_members(&self, group_id: &str) -> Result<Vec<GroupMember>> {
         let mut stmt = self.conn.prepare(
-            "SELECT v.id, v.env_id, v.key, v.value, v.group_id, r.name, e.name
+            "SELECT v.id, v.env_id, v.key, v.value, v.group_id, v.description, v.required, r.name, e.name
              FROM variables v
              JOIN environments e ON e.id = v.env_id
              JOIN repos r ON r.id = e.repo_id
@@ -581,8 +1080,8 @@ impl Vault {
         let rows = stmt.query_map(params![group_id], |row| {
             Ok(GroupMember {
                 variable: row_to_variable(row)?,
-                repo_name: row.get(5)?,
-                env_name: row.get(6)?,
+                repo_name: row.get(7)?,
+                env_name: row.get(8)?,
             })
         })?;
         let mut out = Vec::new();
@@ -620,7 +1119,7 @@ impl Vault {
     pub fn link_candidates(&self, var_id: &str) -> Result<Vec<GroupMember>> {
         let var = self.get_variable(var_id)?;
         let mut stmt = self.conn.prepare(
-            "SELECT v.id, v.env_id, v.key, v.value, v.group_id, r.name, e.name
+            "SELECT v.id, v.env_id, v.key, v.value, v.group_id, v.description, v.required, r.name, e.name
              FROM variables v
              JOIN environments e ON e.id = v.env_id
              JOIN repos r ON r.id = e.repo_id
@@ -630,8 +1129,8 @@ impl Vault {
         let rows = stmt.query_map(params![var.key, var_id], |row| {
             Ok(GroupMember {
                 variable: row_to_variable(row)?,
-                repo_name: row.get(5)?,
-                env_name: row.get(6)?,
+                repo_name: row.get(7)?,
+                env_name: row.get(8)?,
             })
         })?;
         let mut out = Vec::new();
@@ -757,6 +1256,14 @@ impl Vault {
         let vars = self.list_variables(env_id)?;
         let pairs: Vec<(String, String)> = vars.into_iter().map(|v| (v.key, v.value)).collect();
         Ok(serialize_env(&pairs))
+    }
+
+    /// As [`Vault::export_env_text`], in one of the other formats `vault
+    /// export --format` supports.
+    pub fn export_env_as(&self, env_id: &str, format: crate::dotenv::ExportFormat) -> Result<String> {
+        let vars = self.list_variables(env_id)?;
+        let pairs: Vec<(String, String)> = vars.into_iter().map(|v| (v.key, v.value)).collect();
+        crate::dotenv::export_as(&pairs, format)
     }
 
     // ---------------------------------------------------------------

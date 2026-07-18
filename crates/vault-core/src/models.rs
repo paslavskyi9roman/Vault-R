@@ -24,6 +24,13 @@ pub struct Variable {
     pub key: String,
     pub value: String,
     pub group_id: Option<String>,
+    /// Free-text documentation for this variable, e.g. "get this from the
+    /// Stripe dashboard". Per-environment: it is deliberately not
+    /// propagated across a link group on edit, and is vault metadata, not
+    /// `.env` content -- it is never emitted by export.
+    pub description: Option<String>,
+    /// Whether `vault check` should fail when this variable is empty.
+    pub required: bool,
 }
 
 /// A [`Variable`] enriched with how many total variables share its link group,
@@ -113,6 +120,40 @@ pub struct SnapshotWithStats {
     pub added: i64,
     pub removed: i64,
     pub changed: i64,
+}
+
+/// A same-key, same-value pair found between two environments that is not
+/// (yet) a link group -- surfaced by the compare view as a "link these?"
+/// suggestion.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnlinkedMatch {
+    pub key: String,
+    pub var_a: Variable,
+    pub var_b: Variable,
+}
+
+/// A directory linked to a repo/environment via `vault link`, so future CLI
+/// invocations there can omit the `<repo>/<env>` target.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Project {
+    pub id: String,
+    pub path: String,
+    pub env_id: String,
+    pub created_at: String,
+}
+
+/// A [`Project`] joined with its repo/environment names, for display.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectInfo {
+    pub id: String,
+    pub path: String,
+    pub env_id: String,
+    pub repo_name: String,
+    pub env_name: String,
+    pub created_at: String,
 }
 
 /// One match in the command palette: a repo, an environment, or a variable

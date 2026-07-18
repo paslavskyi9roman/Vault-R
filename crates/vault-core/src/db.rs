@@ -39,10 +39,12 @@ enum VaultFile {
     V2 { header: VaultHeader, payload: Vec<u8> },
 }
 
-fn read_vault_file(path: &Path) -> Result<VaultFile> {
-    let bytes = fs::read(path)?;
+/// Parses a vault file already in memory, so callers that need the
+/// pre-migration bytes for a backup (see `Vault::from_plaintext`) can read
+/// the file once and reuse the buffer, rather than reading it a second time.
+fn parse_vault_bytes(bytes: &[u8]) -> Result<VaultFile> {
     if bytes.len() < MAGIC.len() || &bytes[..MAGIC.len()] != MAGIC {
-        return Ok(VaultFile::V1 { blob: bytes });
+        return Ok(VaultFile::V1 { blob: bytes.to_vec() });
     }
     let len_at = MAGIC.len();
     let body_at = len_at + 4;
@@ -142,9 +144,30 @@ fn configure_connection(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-fn migrate(conn: &Connection) -> Result<()> {
-    conn.execute_batch(
-        r#"
+/// Current on-disk schema version, tracked via SQLite's own
+/// `PRAGMA user_version` rather than a bootstrap table -- it lives inside the
+/// database image itself, so it travels with the encrypted blob and with
+/// every backup for free.
+const SCHEMA_VERSION: i32 = 3;
+
+/// One ordered step in the schema's history. `noop` marks a step guaranteed
+/// not to alter existing data (e.g. `CREATE TABLE IF NOT EXISTS` against
+/// tables that already exist), which [`apply_migrations`] uses to decide
+/// whether a pre-migration backup is warranted.
+struct Migration {
+    version: i32,
+    sql: &'static str,
+    noop: bool,
+}
+
+/// Migration 1 is the schema exactly as it originally shipped, written so it
+/// is a no-op against any vault that already has these tables. Every vault
+/// that predates this versioning scheme reports `user_version = 0` (nothing
+/// ever set it) and is simply stamped to 1 without a byte of data changing.
+const MIGRATIONS: &[Migration] = &[Migration {
+    version: 1,
+    noop: true,
+    sql: r#"
         CREATE TABLE IF NOT EXISTS repos (
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL UNIQUE,
@@ -189,8 +212,65 @@ fn migrate(conn: &Connection) -> Result<()> {
             value TEXT NOT NULL
         );
         "#,
-    )?;
-    Ok(())
+}, Migration {
+    // A genuinely new table: not destructive to any existing row, but this
+    // is the first schema change that actually alters structure rather than
+    // just stamping a version, so it is not marked `noop` -- a pre-migration
+    // backup is taken for it like any real change.
+    version: 2,
+    noop: false,
+    sql: r#"
+        CREATE TABLE IF NOT EXISTS projects (
+            id TEXT PRIMARY KEY,
+            path TEXT NOT NULL UNIQUE,
+            env_id TEXT NOT NULL REFERENCES environments(id) ON DELETE CASCADE,
+            created_at TEXT NOT NULL
+        );
+        "#,
+}, Migration {
+    // Each versioned step runs at most once (gated by `user_version`), so
+    // unlike migration 1 these plain `ADD COLUMN`s don't need an `IF NOT
+    // EXISTS` guard of their own.
+    version: 3,
+    noop: false,
+    sql: r#"
+        ALTER TABLE variables ADD COLUMN description TEXT;
+        ALTER TABLE variables ADD COLUMN required INTEGER NOT NULL DEFAULT 0;
+        "#,
+}];
+
+/// Applies whichever of `migrations` have a version greater than `conn`'s
+/// current `user_version`, all inside one transaction, then stamps the new
+/// version and commits. A connection whose `user_version` is already ahead of
+/// `target_version` belongs to a newer build and is refused outright rather
+/// than silently operated on. Returns whether any applied step was *not*
+/// marked `noop`, so callers can decide whether a pre-migration backup was
+/// warranted.
+fn apply_migrations(conn: &Connection, migrations: &[Migration], target_version: i32) -> Result<bool> {
+    let current: i32 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+    if current > target_version {
+        return Err(VaultError::FutureSchema {
+            found: current,
+            supported: target_version,
+        });
+    }
+    let pending: Vec<&Migration> = migrations.iter().filter(|m| m.version > current).collect();
+    if pending.is_empty() {
+        return Ok(false);
+    }
+    let non_trivial = pending.iter().any(|m| !m.noop);
+
+    let tx = conn.unchecked_transaction()?;
+    for m in &pending {
+        tx.execute_batch(m.sql)?;
+    }
+    tx.execute_batch(&format!("PRAGMA user_version = {target_version};"))?;
+    tx.commit()?;
+    Ok(non_trivial)
+}
+
+fn migrate(conn: &Connection) -> Result<bool> {
+    apply_migrations(conn, MIGRATIONS, SCHEMA_VERSION)
 }
 
 impl Vault {
@@ -264,11 +344,18 @@ impl Vault {
         }
         remove_legacy_session_file(dir);
 
-        match read_vault_file(&blob_path)? {
+        let full_bytes = fs::read(&blob_path)?;
+        match parse_vault_bytes(&full_bytes)? {
             VaultFile::V2 { header, payload } => {
                 let key = header.password.open(password)?;
                 let mut plaintext = decrypt(&key, &payload)?;
-                let vault = Self::from_plaintext(key, Format::V2 { header }, dir, &plaintext);
+                let vault = Self::from_plaintext(
+                    key,
+                    Format::V2 { header },
+                    dir,
+                    &plaintext,
+                    Some(&full_bytes),
+                );
                 plaintext.zeroize();
                 vault
             }
@@ -284,14 +371,16 @@ impl Vault {
                 let mut plaintext = decrypt(&legacy_key, &blob)?;
 
                 // Upgrade in place: a fresh random data key, wrapped under a
-                // slot derived from the same password the user just proved.
+                // slot derived from the same password the user just proved. A
+                // v1 vault has no backup support (see `rotate_backup`), so
+                // there is nothing to preserve pre-migration here either.
                 let key = DerivedKey::random();
                 let header = VaultHeader {
                     version: FORMAT_VERSION,
                     password: KeySlot::seal(password, &key)?,
                     recovery: None,
                 };
-                let vault = Self::from_plaintext(key, Format::V2 { header }, dir, &plaintext);
+                let vault = Self::from_plaintext(key, Format::V2 { header }, dir, &plaintext, None);
                 plaintext.zeroize();
                 let vault = vault?;
                 vault.persist()?;
@@ -314,29 +403,51 @@ impl Vault {
         let key = DerivedKey::from_hex(key_hex)?;
         remove_legacy_session_file(dir);
 
-        let (format, payload) = match read_vault_file(&blob_path)? {
+        let full_bytes = fs::read(&blob_path)?;
+        let (format, payload) = match parse_vault_bytes(&full_bytes)? {
             VaultFile::V2 { header, payload } => (Format::V2 { header }, payload),
             VaultFile::V1 { blob } => (Format::V1, blob),
         };
+        let is_v2 = matches!(format, Format::V2 { .. });
         let mut plaintext = decrypt(&key, &payload)?;
-        let vault = Self::from_plaintext(key, format, dir, &plaintext);
+        let vault = Self::from_plaintext(
+            key,
+            format,
+            dir,
+            &plaintext,
+            is_v2.then_some(full_bytes.as_slice()),
+        );
         plaintext.zeroize();
         vault
     }
 
     /// Builds an unlocked vault by loading a decrypted SQLite image into a
     /// fresh in-memory database. `plaintext` is never written to disk.
+    ///
+    /// `original_file_bytes` is the vault file exactly as it was on disk
+    /// before this unlock, used to take a pre-migration backup if `migrate`
+    /// ends up applying a non-trivial step. It is `None` for a v1-format
+    /// vault, which has no backup support regardless (see
+    /// [`Vault::rotate_backup`]) — by the time a `Vault` exists to back up
+    /// from, the in-memory database has already been migrated, so a backup
+    /// taken then would just be a copy of the post-migration state.
     fn from_plaintext(
         key: DerivedKey,
         format: Format,
         dir: &Path,
         plaintext: &[u8],
+        original_file_bytes: Option<&[u8]>,
     ) -> Result<Self> {
         let mut conn = Connection::open_in_memory()?;
         let data = owned_data_from(plaintext)?;
         conn.deserialize(DatabaseName::Main, data, false)?;
         configure_connection(&conn)?;
-        migrate(&conn)?;
+        let migrated_non_trivially = migrate(&conn)?;
+        if migrated_non_trivially {
+            if let (Format::V2 { .. }, Some(bytes)) = (&format, original_file_bytes) {
+                crate::backup::backup_raw_bytes(dir, bytes)?;
+            }
+        }
         Ok(Vault {
             conn,
             key,
@@ -454,7 +565,8 @@ impl Vault {
         }
         remove_legacy_session_file(dir);
 
-        let VaultFile::V2 { header, payload } = read_vault_file(&blob_path)? else {
+        let full_bytes = fs::read(&blob_path)?;
+        let VaultFile::V2 { header, payload } = parse_vault_bytes(&full_bytes)? else {
             return Err(VaultError::InvalidInput(
                 "this vault has no recovery kit".into(),
             ));
@@ -465,7 +577,13 @@ impl Vault {
             .ok_or_else(|| VaultError::InvalidInput("this vault has no recovery kit".into()))?;
         let key = slot.open(&crate::crypto::normalize_recovery_code(code))?;
         let mut plaintext = decrypt(&key, &payload)?;
-        let vault = Self::from_plaintext(key, Format::V2 { header }, dir, &plaintext);
+        let vault = Self::from_plaintext(
+            key,
+            Format::V2 { header },
+            dir,
+            &plaintext,
+            Some(&full_bytes),
+        );
         plaintext.zeroize();
         vault
     }
@@ -500,5 +618,170 @@ impl Vault {
         drop(self.conn);
         // `self.key` (DerivedKey) zeroizes itself on drop here.
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod migration_tests {
+    use super::*;
+
+    #[test]
+    fn a_fresh_connection_reaches_the_current_schema_in_one_pass() {
+        let conn = Connection::open_in_memory().unwrap();
+        migrate(&conn).unwrap();
+        let version: i32 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
+        // migration 2 (the projects table) must have applied too
+        let table_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'projects'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(table_count, 1);
+    }
+
+    #[test]
+    fn migrating_twice_is_idempotent() {
+        let conn = Connection::open_in_memory().unwrap();
+        migrate(&conn).unwrap();
+        // second call: nothing pending, must not error or reapply anything
+        let ran_non_trivial = migrate(&conn).unwrap();
+        assert!(!ran_non_trivial);
+        let version: i32 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn a_future_schema_version_is_rejected() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(&format!("PRAGMA user_version = {};", SCHEMA_VERSION + 1))
+            .unwrap();
+        let err = migrate(&conn).unwrap_err();
+        assert!(matches!(
+            err,
+            VaultError::FutureSchema { found, supported }
+                if found == SCHEMA_VERSION + 1 && supported == SCHEMA_VERSION
+        ));
+    }
+
+    #[test]
+    fn a_failing_migration_rolls_back_and_leaves_the_version_untouched() {
+        let conn = Connection::open_in_memory().unwrap();
+        let migrations = [
+            Migration {
+                version: 1,
+                sql: "CREATE TABLE t (id INTEGER);",
+                noop: true,
+            },
+            Migration {
+                version: 2,
+                sql: "THIS IS NOT VALID SQL;",
+                noop: false,
+            },
+        ];
+        assert!(apply_migrations(&conn, &migrations, 2).is_err());
+
+        let version: i32 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        assert_eq!(version, 0);
+        // the whole batch is one transaction: the earlier valid step must
+        // have rolled back too, not just the failing one
+        let table_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 't'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(table_count, 0);
+    }
+
+    #[test]
+    fn a_vault_with_unset_schema_version_migrates_and_keeps_its_data() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = Vault::create_in(dir.path(), "pw").unwrap();
+        vault.create_repo("api-gateway").unwrap();
+        // simulate a vault written before this versioning scheme existed: at
+        // user_version 0 none of the later migrations' artifacts exist yet
+        vault
+            .conn
+            .execute_batch(
+                "PRAGMA user_version = 0;
+                 DROP TABLE projects;
+                 ALTER TABLE variables DROP COLUMN description;
+                 ALTER TABLE variables DROP COLUMN required;",
+            )
+            .unwrap();
+        vault.persist().unwrap();
+        drop(vault);
+
+        let reopened = Vault::open_in(dir.path(), "pw").unwrap();
+        let repos = reopened.list_repos().unwrap();
+        assert_eq!(repos.len(), 1);
+        assert_eq!(repos[0].name, "api-gateway");
+        let version: i32 = reopened
+            .conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn a_non_trivial_migration_takes_a_pre_migration_backup() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = Vault::create_in(dir.path(), "pw").unwrap();
+        vault.create_repo("api-gateway").unwrap();
+        // simulate a vault that predates the `projects` table and the
+        // description/required columns (schema version 1)
+        vault
+            .conn
+            .execute_batch(
+                "PRAGMA user_version = 1;
+                 DROP TABLE projects;
+                 ALTER TABLE variables DROP COLUMN description;
+                 ALTER TABLE variables DROP COLUMN required;",
+            )
+            .unwrap();
+        vault.persist().unwrap();
+        drop(vault);
+
+        let backups_dir = dir.path().join("backups");
+        let before = if backups_dir.exists() {
+            std::fs::read_dir(&backups_dir).unwrap().count()
+        } else {
+            0
+        };
+
+        let reopened = Vault::open_in(dir.path(), "pw").unwrap();
+        assert_eq!(reopened.list_repos().unwrap()[0].name, "api-gateway");
+        let version: i32 = reopened
+            .conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
+
+        let after = std::fs::read_dir(&backups_dir).unwrap().count();
+        assert_eq!(after, before + 1);
+    }
+
+    #[test]
+    fn opening_a_vault_from_a_newer_schema_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = Vault::create_in(dir.path(), "pw").unwrap();
+        vault
+            .conn
+            .execute_batch(&format!("PRAGMA user_version = {};", SCHEMA_VERSION + 1))
+            .unwrap();
+        vault.persist().unwrap();
+        drop(vault);
+
+        let err = Vault::open_in(dir.path(), "pw").unwrap_err();
+        assert!(matches!(err, VaultError::FutureSchema { .. }));
+        // the future-schema vault was not touched by the refused open
+        let bytes_before = std::fs::read(dir.path().join("vault.db.enc")).unwrap();
+        assert!(Vault::open_in(dir.path(), "pw").is_err());
+        let bytes_after = std::fs::read(dir.path().join("vault.db.enc")).unwrap();
+        assert_eq!(bytes_before, bytes_after);
     }
 }
