@@ -2,6 +2,7 @@ import { useEffect, useState, type KeyboardEvent } from 'react';
 import { useVaultStore } from '../store/useVaultStore';
 import { Skeleton } from './Skeleton';
 import { GearIcon, WarningIcon, ChevronIcon, CloseIcon, LinkIcon } from './icons';
+import { Select } from './Select';
 import type { VariableWithUsage } from '../lib/api';
 import styles from './VariablesTable.module.css';
 
@@ -153,20 +154,14 @@ function SelectionActionBar({ count }: { count: number }) {
       >
         Copy as .env
       </button>
-      <select
-        className={`v-input ${styles.selectionSelect}`}
-        value={bulkMoveTargetId ?? ''}
-        onChange={(e) => setBulkMoveTarget(e.target.value)}
-      >
-        <option value="" disabled>
-          Move to&hellip;
-        </option>
-        {envOptions.map((o) => (
-          <option key={o.id} value={o.id}>
-            {o.label}
-          </option>
-        ))}
-      </select>
+      <Select
+        className={styles.selectionSelect}
+        value={bulkMoveTargetId}
+        options={envOptions.map((o) => ({ value: o.id, label: o.label }))}
+        placeholder="Move to…"
+        ariaLabel="Move selected variables to"
+        onChange={setBulkMoveTarget}
+      />
       <button
         className={`v-btn ${styles.selectionBtn}`}
         disabled={!bulkMoveTargetId}

@@ -34,9 +34,14 @@
   margin-bottom: var(--space-5);
 }
 
+/* The base .v-input focus ring is mint. Left alone it stacks a green halo
+   around a red border, reading as two borders in two colours — so the ring is
+   restated in the dialog's own tone, as a soft halo rather than a hard second
+   ring. */
 .typeInput:focus,
 .typeInput:focus-visible {
   border-color: var(--accent-tone);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-tone) 22%, transparent);
 }
 
 .actions {

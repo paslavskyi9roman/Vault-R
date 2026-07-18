@@ -3,6 +3,7 @@ import { usePresence } from '../lib/usePresence';
 import { envColor } from '../lib/envColor';
 import { Skeleton } from './Skeleton';
 import { CloseIcon } from './icons';
+import { Select } from './Select';
 import type { DiffRow } from '../lib/api';
 import styles from './CompareView.module.css';
 
@@ -58,20 +59,14 @@ export function CompareView() {
             {activeRepo && activeEnv ? `${activeRepo.name}/${activeEnv.name}` : '—'}
           </span>
           <span className={styles.vs}>vs</span>
-          <select
-            className={`v-input ${styles.envSelect}`}
-            value={compareEnvBId ?? ''}
-            onChange={(e) => void setCompareEnvB(e.target.value)}
-          >
-            <option value="" disabled>
-              Choose an environment…
-            </option>
-            {envOptions.map((o) => (
-              <option key={o.id} value={o.id}>
-                {o.label}
-              </option>
-            ))}
-          </select>
+          <Select
+            className={styles.envSelect}
+            value={compareEnvBId}
+            options={envOptions.map((o) => ({ value: o.id, label: o.label }))}
+            placeholder="Choose an environment…"
+            ariaLabel="Environment to compare against"
+            onChange={(v) => void setCompareEnvB(v)}
+          />
         </div>
 
         {!compareEnvBId && <div className={styles.empty}>Pick an environment to compare against.</div>}

@@ -375,7 +375,7 @@
   background: var(--panel);
   padding: 5px var(--space-3);
   width: auto;
-  cursor: pointer;
+  min-width: 150px;
 }
 
 .selectionClear {
