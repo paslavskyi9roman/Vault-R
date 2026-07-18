@@ -1,6 +1,7 @@
 import { useEffect, useState, type KeyboardEvent } from 'react';
 import { useVaultStore } from '../store/useVaultStore';
 import { Skeleton } from './Skeleton';
+import { GearIcon, WarningIcon, ChevronIcon, CloseIcon, LinkIcon } from './icons';
 import type { VariableWithUsage } from '../lib/api';
 import styles from './VariablesTable.module.css';
 
@@ -79,11 +80,12 @@ export function VariablesTable() {
             <div className={styles.colLinked} />
             <div className={styles.colActions}>
               <button
-                className={`v-btn ${styles.rowBtn}`}
+                className={`v-btn ${styles.rowBtn} ${styles.rowIconBtn}`}
                 title="Generate a value"
+                aria-label="Generate a value"
                 onClick={() => openGenerator({ type: 'add' })}
               >
-                &#9881;
+                <GearIcon size={12} />
               </button>
               <button className={`v-btn ${styles.addBtn}`} onClick={() => void addVariable()}>
                 add
@@ -179,7 +181,7 @@ function SelectionActionBar({ count }: { count: number }) {
         Delete
       </button>
       <button className={styles.selectionClear} onClick={clearVarSelection} aria-label="Clear selection">
-        &times;
+        <CloseIcon size={13} />
       </button>
     </div>
   );
@@ -254,8 +256,8 @@ function VariableRow({ variable }: { variable: VariableWithUsage }) {
                 {variable.key}
               </button>
               {missingRequired && (
-                <span className={styles.requiredBadge} title="Required but empty">
-                  &#9888;
+                <span className={styles.requiredBadge} title="Required but empty" role="img" aria-label="Required but empty">
+                  <WarningIcon size={12} />
                 </span>
               )}
             </span>
@@ -279,7 +281,8 @@ function VariableRow({ variable }: { variable: VariableWithUsage }) {
         <div className={styles.colLinked}>
           {variable.groupId && (
             <button className={styles.linkedPill} onClick={() => openGroupPopover(variable.groupId!)}>
-              &#9101; linked &times;{variable.groupUsage}
+              <LinkIcon size={11} />
+              linked &times;{variable.groupUsage}
             </button>
           )}
         </div>
@@ -294,11 +297,12 @@ function VariableRow({ variable }: { variable: VariableWithUsage }) {
             copy
           </button>
           <button
-            className={`v-btn ${styles.rowBtn}`}
+            className={`v-btn ${styles.rowBtn} ${styles.rowIconBtn}`}
             title="Generate a new value"
+            aria-label={`Generate a new value for ${variable.key}`}
             onClick={() => openGenerator({ type: 'row', varId: variable.id })}
           >
-            &#9881;
+            <GearIcon size={12} />
           </button>
           {!variable.groupId && (
             <button
@@ -309,12 +313,13 @@ function VariableRow({ variable }: { variable: VariableWithUsage }) {
             </button>
           )}
           <button
-            className={`v-btn ${styles.rowBtn}`}
+            className={`v-btn ${styles.rowBtn} ${styles.rowIconBtn} ${styles.expandBtn}`}
             title="Description and required flag"
+            aria-label={`Details for ${variable.key}`}
             aria-expanded={expanded}
             onClick={() => toggleVarExpand(variable.id)}
           >
-            {expanded ? '▲' : '…'}
+            <ChevronIcon size={12} />
           </button>
           <button
             className={`v-btn v-btn--danger ${styles.rowBtn}`}

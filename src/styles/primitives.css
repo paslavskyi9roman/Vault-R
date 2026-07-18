@@ -332,13 +332,17 @@
   }
 
   .v-close-x {
-    font-size: 18px;
-    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    flex-shrink: 0;
     color: var(--text-faint);
     background: transparent;
     border: none;
     border-radius: 5px;
-    padding: 2px 6px;
+    padding: 0;
     cursor: pointer;
     transition:
       color var(--t-hover),

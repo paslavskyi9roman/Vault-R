@@ -1,5 +1,6 @@
 import { useVaultStore } from '../store/useVaultStore';
 import { usePresence, useLastPresent } from '../lib/usePresence';
+import { CloseIcon } from './icons';
 import styles from './GroupPopover.module.css';
 
 export function GroupPopover() {
@@ -23,7 +24,7 @@ export function GroupPopover() {
           <div className="v-modal-header">
             <span className="v-modal-title">Linked secret group</span>
             <button className="v-close-x" onClick={closeGroupPopover} aria-label="Close">
-              &times;
+              <CloseIcon size={13} />
             </button>
           </div>
           <div className="v-modal-sub">Editing the value in any one of these updates all of them.</div>

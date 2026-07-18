@@ -2,6 +2,7 @@ import { type KeyboardEvent } from 'react';
 import { useVaultStore } from '../store/useVaultStore';
 import { envColor } from '../lib/envColor';
 import { Spinner } from './Spinner';
+import { ChevronIcon, PlusIcon, PencilIcon, DuplicateIcon, CloseIcon } from './icons';
 import styles from './Sidebar.module.css';
 
 export function Sidebar() {
@@ -48,8 +49,13 @@ export function Sidebar() {
     <nav className={styles.sidebar}>
       <div className={styles.header}>
         <span className={styles.headerText}>REPOSITORIES</span>
-        <button className={`v-btn ${styles.addBtn}`} onClick={toggleAddRepo} title="Add a repository">
-          +
+        <button
+          className={`v-btn ${styles.addBtn}`}
+          onClick={toggleAddRepo}
+          title="Add a repository"
+          aria-label="Add a repository"
+        >
+          <PlusIcon size={12} />
         </button>
       </div>
 
@@ -84,7 +90,7 @@ export function Sidebar() {
                     onClick={() => toggleExpandRepo(repo.id)}
                     aria-expanded={expanded}
                   >
-                    <span className={styles.chevron}>{expanded ? '▾' : '▸'}</span>
+                    <ChevronIcon size={11} className={styles.chevron} />
                     <span className={styles.repoName}>{repo.name}</span>
                     <span className={styles.countPill}>{repo.envs.length}</span>
                   </button>
@@ -92,23 +98,26 @@ export function Sidebar() {
                     <button
                       className={styles.action}
                       title={`Add environment to ${repo.name}`}
+                      aria-label={`Add environment to ${repo.name}`}
                       onClick={() => startAddEnv(repo.id)}
                     >
-                      +
+                      <PlusIcon size={12} />
                     </button>
                     <button
                       className={styles.action}
                       title={`Rename ${repo.name}`}
+                      aria-label={`Rename ${repo.name}`}
                       onClick={() => startRenameRepo(repo.id, repo.name)}
                     >
-                      &#9998;
+                      <PencilIcon size={12} />
                     </button>
                     <button
                       className={`${styles.action} ${styles.actionDanger}`}
                       title={`Delete ${repo.name}`}
+                      aria-label={`Delete ${repo.name}`}
                       onClick={() => requestDeleteRepo(repo.id, repo.name)}
                     >
-                      &times;
+                      <CloseIcon size={12} />
                     </button>
                   </div>
                 </div>
@@ -166,7 +175,7 @@ export function Sidebar() {
                             {duplicateBusy && <Spinner size={10} />}
                           </button>
                           <button className={styles.inlineCancel} onClick={cancelDuplicateEnv} aria-label="Cancel">
-                            &times;
+                            <CloseIcon size={12} />
                           </button>
                         </div>
                       );
@@ -185,23 +194,26 @@ export function Sidebar() {
                           <button
                             className={styles.action}
                             title={`Duplicate ${env.name}`}
+                            aria-label={`Duplicate ${env.name}`}
                             onClick={() => startDuplicateEnv(env.id, env.name)}
                           >
-                            &#10697;
+                            <DuplicateIcon size={12} />
                           </button>
                           <button
                             className={styles.action}
                             title={`Rename ${env.name}`}
+                            aria-label={`Rename ${env.name}`}
                             onClick={() => startRenameEnv(env.id, env.name)}
                           >
-                            &#9998;
+                            <PencilIcon size={12} />
                           </button>
                           <button
                             className={`${styles.action} ${styles.actionDanger}`}
                             title={`Delete ${env.name}`}
+                            aria-label={`Delete ${env.name}`}
                             onClick={() => requestDeleteEnv(env.id, repo.name, env.name)}
                           >
-                            &times;
+                            <CloseIcon size={12} />
                           </button>
                         </div>
                       </div>
@@ -267,7 +279,7 @@ function InlineForm(props: {
         {props.submitLabel ?? 'Add'}
       </button>
       <button className={styles.inlineCancel} onClick={props.onCancel} aria-label="Cancel">
-        &times;
+        <CloseIcon size={12} />
       </button>
     </div>
   );

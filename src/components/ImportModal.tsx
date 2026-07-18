@@ -1,6 +1,7 @@
 import { useState, type DragEvent } from 'react';
 import { useVaultStore } from '../store/useVaultStore';
 import { usePresence } from '../lib/usePresence';
+import { CloseIcon } from './icons';
 
 export function ImportModal() {
   const importOpen = useVaultStore((s) => s.importOpen);
@@ -38,7 +39,7 @@ export function ImportModal() {
           <div className="v-modal-header">
             <span className="v-modal-title">Import .env</span>
             <button className="v-close-x" onClick={closeImport} aria-label="Close">
-              &times;
+              <CloseIcon size={13} />
             </button>
           </div>
           <div className="v-modal-sub">

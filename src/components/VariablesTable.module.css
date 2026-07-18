@@ -144,9 +144,27 @@
 
 .requiredBadge {
   color: var(--danger);
-  font-size: 12px;
   cursor: default;
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+}
+
+/* Icon-only row buttons need to be square rather than sized to a text label. */
+.rowIconBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-1) var(--space-2);
+}
+
+/* Points right when closed, down when the detail row is open. */
+.expandBtn > svg {
+  transition: transform var(--dur-2) var(--ease-standard);
+}
+
+.expandBtn[aria-expanded='true'] > svg {
+  transform: rotate(90deg);
 }
 
 /* ---- value cell ---- */
@@ -184,6 +202,9 @@
 }
 
 .linkedPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-size: 10.5px;
   color: var(--accent);
   background: var(--accent-dim);

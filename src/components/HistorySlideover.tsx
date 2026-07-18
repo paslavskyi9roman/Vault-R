@@ -1,6 +1,7 @@
 import { useVaultStore } from '../store/useVaultStore';
 import { usePresence } from '../lib/usePresence';
 import { timeAgo } from '../lib/envColor';
+import { ChevronIcon, RestoreIcon, CloseIcon } from './icons';
 import type { DiffRow } from '../lib/api';
 import styles from './HistorySlideover.module.css';
 
@@ -28,7 +29,7 @@ export function HistorySlideover() {
         <div className={styles.header}>
           <span className={styles.title}>Version history</span>
           <button className="v-close-x" onClick={closeHistory} aria-label="Close">
-            &times;
+            <CloseIcon size={13} />
           </button>
         </div>
         <div className={styles.sub}>
@@ -45,7 +46,7 @@ export function HistorySlideover() {
                 onClick={() => void toggleSnapshotDiff(h.id)}
                 aria-expanded={expanded}
               >
-                <span className={styles.chevron}>{expanded ? '▾' : '▸'}</span>
+                <ChevronIcon size={11} className={styles.chevron} />
                 <div className={styles.textWrap}>
                   <div className={styles.time}>{label}</div>
                   <div className={styles.summary}>{h.summary}</div>
@@ -122,11 +123,12 @@ function SnapshotDiff({ snapshotId }: { snapshotId: string }) {
             </button>
             {row.kind !== 'added' && (
               <button
-                className={`v-btn ${styles.diffBtn}`}
+                className={`v-btn ${styles.diffBtn} ${styles.diffIconBtn}`}
                 title={`Restore ${row.key} to this value`}
+                aria-label={`Restore ${row.key} to this value`}
                 onClick={() => void restoreVariableFromSnapshot(snapshotId, row.key)}
               >
-                &#8617;
+                <RestoreIcon size={11} />
               </button>
             )}
           </div>

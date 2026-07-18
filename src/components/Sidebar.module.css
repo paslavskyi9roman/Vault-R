@@ -73,12 +73,18 @@
   box-shadow: var(--focus-ring-inset);
 }
 
+/* One chevron that pivots, rather than swapping between two characters —
+   which is what makes the disclosure animate at all. */
 .chevron {
   color: var(--text-faint);
-  font-size: 10px;
-  width: 10px;
   flex-shrink: 0;
-  transition: color var(--t-hover);
+  transition:
+    color var(--t-hover),
+    transform var(--dur-2) var(--ease-standard);
+}
+
+.repoMain[aria-expanded='true'] .chevron {
+  transform: rotate(90deg);
 }
 
 .row:hover .chevron {

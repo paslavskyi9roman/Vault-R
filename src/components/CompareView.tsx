@@ -2,6 +2,7 @@ import { useVaultStore } from '../store/useVaultStore';
 import { usePresence } from '../lib/usePresence';
 import { envColor } from '../lib/envColor';
 import { Skeleton } from './Skeleton';
+import { CloseIcon } from './icons';
 import type { DiffRow } from '../lib/api';
 import styles from './CompareView.module.css';
 
@@ -48,7 +49,7 @@ export function CompareView() {
         <div className={styles.header}>
           <span className={styles.title}>Compare environments</span>
           <button className="v-close-x" onClick={closeCompare} aria-label="Close">
-            &times;
+            <CloseIcon size={13} />
           </button>
         </div>
 

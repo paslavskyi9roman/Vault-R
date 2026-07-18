@@ -2,6 +2,7 @@ import { useVaultStore, type SafetyTab } from '../store/useVaultStore';
 import { usePresence } from '../lib/usePresence';
 import { Spinner } from './Spinner';
 import { Skeleton } from './Skeleton';
+import { CloseIcon } from './icons';
 import type { DuplicateValueGroup, LeakReport, SecretHealthRow } from '../lib/api';
 import styles from './SafetyPanel.module.css';
 
@@ -27,7 +28,7 @@ export function SafetyPanel() {
         <div className={styles.header}>
           <span className={styles.title}>Safety</span>
           <button className="v-close-x" onClick={closeSafety} aria-label="Close">
-            &times;
+            <CloseIcon size={13} />
           </button>
         </div>
         <div className={styles.tabRow} role="tablist">

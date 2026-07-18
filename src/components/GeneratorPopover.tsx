@@ -2,6 +2,7 @@ import { useVaultStore } from '../store/useVaultStore';
 import type { GeneratorKind } from '../lib/api';
 import { usePresence } from '../lib/usePresence';
 import { Spinner } from './Spinner';
+import { CloseIcon } from './icons';
 import styles from './GeneratorPopover.module.css';
 
 const KIND_OPTIONS: { value: GeneratorKind; label: string }[] = [
@@ -32,7 +33,7 @@ export function GeneratorPopover() {
           <div className="v-modal-header">
             <span className="v-modal-title">Generate a secret</span>
             <button className="v-close-x" onClick={closeGenerator} aria-label="Close">
-              &times;
+              <CloseIcon size={13} />
             </button>
           </div>
           <div className="v-modal-sub">

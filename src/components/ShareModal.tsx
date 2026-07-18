@@ -1,6 +1,7 @@
 import { type KeyboardEvent } from 'react';
 import { useVaultStore } from '../store/useVaultStore';
 import { usePresence } from '../lib/usePresence';
+import { CloseIcon } from './icons';
 import styles from './ShareModal.module.css';
 
 export function ShareModal() {
@@ -27,7 +28,7 @@ export function ShareModal() {
           <div className="v-modal-header">
             <span className="v-modal-title">Manage access</span>
             <button className="v-close-x" onClick={closeShare} aria-label="Close">
-              &times;
+              <CloseIcon size={13} />
             </button>
           </div>
           <div className="v-modal-sub">

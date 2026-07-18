@@ -1,5 +1,6 @@
 import { useVaultStore } from '../store/useVaultStore';
 import { usePresence, useLastPresent } from '../lib/usePresence';
+import { CloseIcon } from './icons';
 import styles from './LinkModal.module.css';
 
 export function LinkModal() {
@@ -27,7 +28,7 @@ export function LinkModal() {
           <div className="v-modal-header">
             <span className="v-modal-title">Link "{linkModalKey}"</span>
             <button className="v-close-x" onClick={closeLinkModal} aria-label="Close">
-              &times;
+              <CloseIcon size={13} />
             </button>
           </div>
           <div className="v-modal-sub">
