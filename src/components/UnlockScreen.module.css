@@ -1,0 +1,98 @@
+.root {
+  height: 100vh;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6);
+  background: var(--bg);
+}
+
+.card {
+  width: 380px;
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: 36px var(--space-7);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--edge-top), var(--elev-3);
+  animation: vaultFadeIn var(--dur-4) var(--ease-out);
+}
+
+.glyph {
+  font-family: var(--font-mono);
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 22px;
+  margin-bottom: var(--space-1);
+}
+
+.title {
+  font-size: 19px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.sub {
+  font-size: 12.5px;
+  color: var(--text-dim);
+  line-height: 1.5;
+  margin-bottom: var(--space-3);
+}
+
+.input {
+  font-family: var(--font-mono);
+  padding: 9px var(--space-4);
+}
+
+.rememberRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: 12.5px;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.error {
+  font-size: 12px;
+  color: var(--danger);
+  line-height: 1.5;
+}
+
+.submit {
+  padding: 10px var(--space-4);
+  margin-top: var(--space-1);
+}
+
+.footerLinks {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-top: 2px;
+}
+
+.linkBtn {
+  font-size: 11.5px;
+  color: var(--text-faint);
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  padding: 2px;
+  margin: -2px;
+  text-decoration: underline;
+  transition: color var(--t-hover);
+}
+
+.linkBtn:hover {
+  color: var(--text-dim);
+}
+
+.linkBtn:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}

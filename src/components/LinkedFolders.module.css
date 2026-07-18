@@ -1,0 +1,88 @@
+.wrap {
+  margin-bottom: 20px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 14px;
+  transition: border-color var(--t-hover);
+}
+
+.wrap:hover {
+  border-color: var(--border-hover);
+}
+
+.headerRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+
+.label {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--text-faint);
+  letter-spacing: 0.5px;
+  flex: 1;
+}
+
+.addBtn {
+  font-size: 11px;
+  color: var(--accent);
+  padding: var(--space-1) var(--space-3);
+  border-radius: 5px;
+  flex-shrink: 0;
+}
+
+.addBtn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.empty {
+  font-size: 11.5px;
+  color: var(--text-faint);
+  line-height: 1.5;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 5px 0;
+}
+
+.path {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.unlink {
+  font-size: 11px;
+  padding: 3px var(--space-3);
+  border-radius: 5px;
+  flex-shrink: 0;
+  opacity: 0;
+  transition:
+    opacity var(--t-hover),
+    color var(--t-hover),
+    border-color var(--t-hover),
+    background-color var(--t-hover);
+}
+
+.row:hover .unlink,
+.row:focus-within .unlink {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .unlink {
+    opacity: 1;
+  }
+}
