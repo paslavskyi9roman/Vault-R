@@ -85,6 +85,7 @@ function VariableRow({ variable }: { variable: VariableWithUsage }) {
   const revealed = useVaultStore((s) => !!s.revealed[variable.id]);
   const toggleReveal = useVaultStore((s) => s.toggleReveal);
   const commitVariableValue = useVaultStore((s) => s.commitVariableValue);
+  const commitVariableKey = useVaultStore((s) => s.commitVariableKey);
   const deleteVariable = useVaultStore((s) => s.deleteVariable);
   const copyVariable = useVaultStore((s) => s.copyVariable);
   const openLinkModal = useVaultStore((s) => s.openLinkModal);
@@ -93,14 +94,48 @@ function VariableRow({ variable }: { variable: VariableWithUsage }) {
   const [draft, setDraft] = useState(variable.value);
   useEffect(() => setDraft(variable.value), [variable.value, variable.id]);
 
+  const [editingKey, setEditingKey] = useState(false);
+  const [keyDraft, setKeyDraft] = useState(variable.key);
+  useEffect(() => setKeyDraft(variable.key), [variable.key, variable.id]);
+
   function commit() {
     if (draft !== variable.value) void commitVariableValue(variable.id, draft);
+  }
+
+  function commitKey() {
+    setEditingKey(false);
+    if (keyDraft.trim() !== variable.key) void commitVariableKey(variable.id, keyDraft);
   }
 
   return (
     <div style={tableRowStyle}>
       <div style={colKeyStyle}>
-        <span style={keyTextStyle}>{variable.key}</span>
+        {editingKey ? (
+          <input
+            style={keyInputStyle}
+            value={keyDraft}
+            onChange={(e) => setKeyDraft(e.target.value)}
+            onBlur={commitKey}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+              if (e.key === 'Escape') {
+                setKeyDraft(variable.key);
+                setEditingKey(false);
+              }
+            }}
+            autoFocus
+            spellCheck={false}
+            autoComplete="off"
+          />
+        ) : (
+          <span
+            style={keyTextStyle}
+            title="Click to rename"
+            onClick={() => setEditingKey(true)}
+          >
+            {variable.key}
+          </span>
+        )}
       </div>
       <div style={colValueStyle}>
         <input
@@ -215,7 +250,26 @@ const colActionsStyle: React.CSSProperties = {
   justifyContent: 'flex-end',
   boxSizing: 'border-box',
 };
-const keyTextStyle: React.CSSProperties = { fontFamily: 'var(--font-mono)', fontSize: '13px', color: 'var(--key)', fontWeight: 600 };
+const keyTextStyle: React.CSSProperties = {
+  fontFamily: 'var(--font-mono)',
+  fontSize: '13px',
+  color: 'var(--key)',
+  fontWeight: 600,
+  cursor: 'text',
+};
+const keyInputStyle: React.CSSProperties = {
+  width: '100%',
+  fontFamily: 'var(--font-mono)',
+  fontSize: '13px',
+  color: 'var(--key)',
+  fontWeight: 600,
+  background: 'var(--panel-2)',
+  border: '1px solid var(--border)',
+  borderRadius: '4px',
+  outline: 'none',
+  padding: '2px 5px',
+  boxSizing: 'border-box',
+};
 const valueInputStyle: React.CSSProperties = {
   width: '100%',
   fontFamily: 'var(--font-mono)',

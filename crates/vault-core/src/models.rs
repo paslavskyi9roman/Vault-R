@@ -92,6 +92,29 @@ pub struct SnapshotVariable {
     pub group_id: Option<String>,
 }
 
+/// One key's fate between two points in an environment's history.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DiffRow {
+    pub key: String,
+    /// `added`, `removed` or `changed`.
+    pub kind: String,
+    pub old_value: Option<String>,
+    pub new_value: Option<String>,
+}
+
+/// A [`Snapshot`] with a summary of how much it altered, so the history list
+/// can show "+2 -1 ~3" without the caller diffing every entry itself.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SnapshotWithStats {
+    #[serde(flatten)]
+    pub snapshot: Snapshot,
+    pub added: i64,
+    pub removed: i64,
+    pub changed: i64,
+}
+
 /// One match in the command palette: a repo, an environment, or a variable
 /// key, anywhere in the vault.
 #[derive(Debug, Clone, Serialize, Deserialize)]

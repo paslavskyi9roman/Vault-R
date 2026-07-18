@@ -7,6 +7,12 @@ export function UnlockScreen() {
   const authError = useVaultStore((s) => s.authError);
   const createVault = useVaultStore((s) => s.createVault);
   const unlockVault = useVaultStore((s) => s.unlockVault);
+  const recoveryMode = useVaultStore((s) => s.recoveryMode);
+  const setRecoveryMode = useVaultStore((s) => s.setRecoveryMode);
+  const recoveryCode = useVaultStore((s) => s.recoveryCode);
+  const setRecoveryCode = useVaultStore((s) => s.setRecoveryCode);
+  const unlockWithRecovery = useVaultStore((s) => s.unlockWithRecovery);
+  const restoreBackupFromUnlock = useVaultStore((s) => s.restoreBackupFromUnlock);
 
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -18,6 +24,10 @@ export function UnlockScreen() {
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setLocalError(null);
+    if (recoveryMode) {
+      void unlockWithRecovery();
+      return;
+    }
     if (isCreate) {
       if (password.length < 8) {
         setLocalError('Master password must be at least 8 characters.');
@@ -33,6 +43,37 @@ export function UnlockScreen() {
     }
   }
 
+  if (recoveryMode) {
+    return (
+      <div style={rootStyle}>
+        <form style={cardStyle} onSubmit={handleSubmit}>
+          <div style={glyphStyle}>&#10095;_</div>
+          <div style={titleStyle}>Use your recovery code</div>
+          <div style={subStyle}>
+            Enter the recovery code from your recovery kit. You will be asked to set a new master
+            password straight afterwards.
+          </div>
+          <input
+            style={inputStyle}
+            placeholder="XXXXX-XXXXX-XXXXX-XXXXX-XXXXX"
+            value={recoveryCode}
+            onChange={(e) => setRecoveryCode(e.target.value)}
+            autoFocus
+            spellCheck={false}
+            autoComplete="off"
+          />
+          {authError && <div style={errorStyle}>{authError}</div>}
+          <button style={primaryBtnStyle} type="submit" disabled={authBusy}>
+            {authBusy ? 'Please wait…' : 'Unlock with recovery code'}
+          </button>
+          <button style={linkBtnStyle} type="button" onClick={() => setRecoveryMode(false)}>
+            Back to master password
+          </button>
+        </form>
+      </div>
+    );
+  }
+
   return (
     <div style={rootStyle}>
       <form style={cardStyle} onSubmit={handleSubmit}>
@@ -40,7 +81,7 @@ export function UnlockScreen() {
         <div style={titleStyle}>{isCreate ? 'Create your vault' : 'Unlock vault'}</div>
         <div style={subStyle}>
           {isCreate
-            ? 'Choose a master password. There is no recovery if you forget it — the vault is encrypted with a key derived only from this password.'
+            ? 'Choose a master password. It is the only thing that decrypts this vault — create a recovery kit from settings afterwards so a forgotten password is not the end of the story.'
             : 'Enter your master password to unlock.'}
         </div>
 
@@ -71,6 +112,79 @@ export function UnlockScreen() {
 
         <button style={primaryBtnStyle} type="submit" disabled={authBusy}>
           {authBusy ? 'Please wait…' : isCreate ? 'Create vault' : 'Unlock'}
+        </button>
+
+        {!isCreate && (
+          <div style={footerLinksStyle}>
+            <button style={linkBtnStyle} type="button" onClick={() => setRecoveryMode(true)}>
+              Forgot password?
+            </button>
+            <button
+              style={linkBtnStyle}
+              type="button"
+              onClick={() => void restoreBackupFromUnlock()}
+            >
+              Restore from backup…
+            </button>
+          </div>
+        )}
+      </form>
+    </div>
+  );
+}
+
+/// Shown after a recovery unlock: the vault is open but its master password is
+/// unknown, so setting one is the only way forward.
+export function ResetPasswordScreen() {
+  const authBusy = useVaultStore((s) => s.authBusy);
+  const authError = useVaultStore((s) => s.authError);
+  const resetPasswordAfterRecovery = useVaultStore((s) => s.resetPasswordAfterRecovery);
+
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [localError, setLocalError] = useState<string | null>(null);
+
+  function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    setLocalError(null);
+    if (password.length < 8) {
+      setLocalError('Master password must be at least 8 characters.');
+      return;
+    }
+    if (password !== confirm) {
+      setLocalError('Passwords do not match.');
+      return;
+    }
+    void resetPasswordAfterRecovery(password);
+  }
+
+  return (
+    <div style={rootStyle}>
+      <form style={cardStyle} onSubmit={handleSubmit}>
+        <div style={glyphStyle}>&#10095;_</div>
+        <div style={titleStyle}>Set a new master password</div>
+        <div style={subStyle}>
+          Your vault is unlocked. Choose a new master password to lock it with — your recovery code
+          keeps working.
+        </div>
+        <input
+          style={inputStyle}
+          type="password"
+          placeholder="New master password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          autoFocus
+        />
+        <input
+          style={inputStyle}
+          type="password"
+          placeholder="Confirm new master password"
+          value={confirm}
+          onChange={(e) => setConfirm(e.target.value)}
+        />
+        {(localError || authError) && <div style={errorStyle}>{localError ?? authError}</div>}
+        <button style={primaryBtnStyle} type="submit" disabled={authBusy}>
+          {authBusy ? 'Please wait…' : 'Set master password'}
         </button>
       </form>
     </div>
@@ -144,6 +258,23 @@ const rememberRowStyle: React.CSSProperties = {
 const errorStyle: React.CSSProperties = {
   fontSize: '12px',
   color: 'var(--danger)',
+};
+
+const footerLinksStyle: React.CSSProperties = {
+  display: 'flex',
+  justifyContent: 'space-between',
+  gap: '8px',
+  marginTop: '2px',
+};
+
+const linkBtnStyle: React.CSSProperties = {
+  fontSize: '11.5px',
+  color: 'var(--text-faint)',
+  background: 'transparent',
+  border: 'none',
+  cursor: 'pointer',
+  padding: 0,
+  textDecoration: 'underline',
 };
 
 const primaryBtnStyle: React.CSSProperties = {

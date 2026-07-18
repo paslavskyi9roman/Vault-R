@@ -1,9 +1,10 @@
 use crate::state::{self, AppState};
 use tauri::State;
 use tauri_plugin_clipboard_manager::ClipboardExt;
+use vault_core::backup::BackupInfo;
 use vault_core::models::{
-    Environment, GroupMember, Member, Repo, RepoSummary, SearchResult, Snapshot, Variable,
-    VariableWithUsage,
+    DiffRow, Environment, GroupMember, Member, Repo, RepoSummary, SearchResult, Snapshot,
+    SnapshotWithStats, Variable, VariableWithUsage,
 };
 use vault_core::Vault;
 
@@ -35,6 +36,8 @@ pub fn vault_try_keychain(state: State<AppState>) -> Result<bool, String> {
     };
     match Vault::open_with_key(&key_hex) {
         Ok(vault) => {
+            // Best-effort: a failed rotation must never block getting in.
+            let _ = vault.rotate_backup();
             *state.vault.lock().map_err(|_| "vault state poisoned")? = Some(vault);
             Ok(true)
         }
@@ -55,6 +58,7 @@ pub fn vault_create(password: String, remember: bool, state: State<AppState>) ->
 #[tauri::command]
 pub fn vault_unlock(password: String, remember: bool, state: State<AppState>) -> Result<(), String> {
     let vault = Vault::open(&password).map_err(stringify)?;
+    let _ = vault.rotate_backup();
     if remember {
         state::remember_key(&vault.key_hex())?;
     } else {
@@ -64,8 +68,29 @@ pub fn vault_unlock(password: String, remember: bool, state: State<AppState>) ->
     Ok(())
 }
 
+/// Unlocks with a recovery code from the user's recovery kit. The frontend
+/// must follow this with [`vault_reset_password`] — a vault whose password is
+/// unknown is not usable for long.
 #[tauri::command]
-pub fn vault_lock(state: State<AppState>) -> Result<(), String> {
+pub fn vault_unlock_with_recovery(code: String, state: State<AppState>) -> Result<(), String> {
+    let vault = Vault::open_with_recovery(&code).map_err(stringify)?;
+    let _ = vault.rotate_backup();
+    *state.vault.lock().map_err(|_| "vault state poisoned")? = Some(vault);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn vault_lock(app: tauri::AppHandle, state: State<AppState>) -> Result<(), String> {
+    // Reclaim a secret still sitting on the clipboard from before the lock.
+    if let Ok(mut last) = state.last_copied.lock() {
+        if let Some(copied) = last.take() {
+            if let Ok(current) = app.clipboard().read_text() {
+                if current == copied {
+                    let _ = app.clipboard().write_text(String::new());
+                }
+            }
+        }
+    }
     let taken = state
         .vault
         .lock()
@@ -75,6 +100,103 @@ pub fn vault_lock(state: State<AppState>) -> Result<(), String> {
         vault.lock().map_err(stringify)?;
     }
     Ok(())
+}
+
+/// Whether the open vault is still in the legacy on-disk format, which blocks
+/// password changes, recovery kits and backups until it is upgraded.
+#[tauri::command]
+pub fn vault_needs_migration(state: State<AppState>) -> Result<bool, String> {
+    state::with_vault(&state, |v| Ok(v.needs_migration()))
+}
+
+// ---------------------------------------------------------------------
+// Master password and recovery kit
+// ---------------------------------------------------------------------
+
+#[tauri::command]
+pub fn vault_change_password(
+    current_password: String,
+    new_password: String,
+    remember: bool,
+    state: State<AppState>,
+) -> Result<(), String> {
+    state::with_vault(&state, |v| v.rotate_backup().map(|_| ()))?;
+    state::with_vault_mut(&state, |v| v.change_password(&current_password, &new_password))?;
+    // The keychain holds the data key, which a password change does not alter,
+    // so the stored entry stays valid — but honour the user's choice here.
+    if remember {
+        let key_hex = state::with_vault(&state, |v| Ok(v.key_hex()))?;
+        state::remember_key(&key_hex)?;
+    } else {
+        state::forget_key();
+    }
+    Ok(())
+}
+
+/// Sets a new master password after a recovery unlock, where by definition the
+/// old one is not available.
+#[tauri::command]
+pub fn vault_reset_password(new_password: String, state: State<AppState>) -> Result<(), String> {
+    state::with_vault_mut(&state, |v| v.reset_password(&new_password))
+}
+
+#[tauri::command]
+pub fn vault_has_recovery_code(state: State<AppState>) -> Result<bool, String> {
+    state::with_vault(&state, |v| Ok(v.has_recovery_code()))
+}
+
+/// Creates a recovery code and returns it. This is the only time the code is
+/// ever available — it is stored only in a form that requires the code itself
+/// to open — so the frontend must present it for the user to save.
+#[tauri::command]
+pub fn vault_generate_recovery_code(state: State<AppState>) -> Result<String, String> {
+    state::with_vault(&state, |v| v.rotate_backup().map(|_| ()))?;
+    state::with_vault_mut(&state, |v| v.generate_recovery_code())
+}
+
+// ---------------------------------------------------------------------
+// Backups
+// ---------------------------------------------------------------------
+
+/// Writes the printable recovery kit to a path the user picked. The wording
+/// lives here rather than in the frontend so the warnings cannot drift.
+#[tauri::command]
+pub fn save_recovery_kit(path: String, code: String) -> Result<(), String> {
+    let body = format!(
+        "Vault-R recovery kit\n\
+         \n\
+         Recovery code: {code}\n\
+         \n\
+         This code unlocks your vault without the master password.\n\
+         Keep it somewhere safe and offline: anyone holding it can read every\n\
+         secret in the vault. Generating a new recovery kit invalidates this code.\n"
+    );
+    std::fs::write(&path, body).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn list_backups(state: State<AppState>) -> Result<Vec<BackupInfo>, String> {
+    state::with_vault(&state, |v| v.list_backups())
+}
+
+#[tauri::command]
+pub fn export_backup(path: String, state: State<AppState>) -> Result<(), String> {
+    state::with_vault(&state, |v| v.export_backup(std::path::Path::new(&path)))
+}
+
+/// Replaces the vault on disk with a backup file. Only valid while locked —
+/// the caller then unlocks with whatever password protected that backup.
+#[tauri::command]
+pub fn restore_backup(path: String, state: State<AppState>) -> Result<(), String> {
+    if state
+        .vault
+        .lock()
+        .map_err(|_| "vault state poisoned".to_string())?
+        .is_some()
+    {
+        return Err("lock the vault before restoring a backup".into());
+    }
+    vault_core::backup::restore_backup(std::path::Path::new(&path)).map_err(stringify)
 }
 
 // ---------------------------------------------------------------------
@@ -92,12 +214,36 @@ pub fn create_repo(name: String, state: State<AppState>) -> Result<Repo, String>
 }
 
 #[tauri::command]
+pub fn rename_repo(id: String, new_name: String, state: State<AppState>) -> Result<(), String> {
+    state::with_vault(&state, |v| v.rename_repo(&id, &new_name))
+}
+
+#[tauri::command]
+pub fn delete_repo(id: String, state: State<AppState>) -> Result<(), String> {
+    state::with_vault(&state, |v| v.delete_repo(&id))
+}
+
+#[tauri::command]
 pub fn create_environment(
     repo_id: String,
     name: String,
     state: State<AppState>,
 ) -> Result<Environment, String> {
     state::with_vault(&state, |v| v.create_environment(&repo_id, &name))
+}
+
+#[tauri::command]
+pub fn rename_environment(
+    id: String,
+    new_name: String,
+    state: State<AppState>,
+) -> Result<(), String> {
+    state::with_vault(&state, |v| v.rename_environment(&id, &new_name))
+}
+
+#[tauri::command]
+pub fn delete_environment(id: String, state: State<AppState>) -> Result<(), String> {
+    state::with_vault(&state, |v| v.delete_environment(&id))
 }
 
 // ---------------------------------------------------------------------
@@ -129,6 +275,15 @@ pub fn update_variable_value(
     state: State<AppState>,
 ) -> Result<(), String> {
     state::with_vault(&state, |v| v.update_variable_value(&var_id, &new_value))
+}
+
+#[tauri::command]
+pub fn rename_variable_key(
+    var_id: String,
+    new_key: String,
+    state: State<AppState>,
+) -> Result<(), String> {
+    state::with_vault(&state, |v| v.rename_variable_key(&var_id, &new_key))
 }
 
 #[tauri::command]
@@ -202,6 +357,34 @@ pub fn list_snapshots(env_id: String, state: State<AppState>) -> Result<Vec<Snap
 }
 
 #[tauri::command]
+pub fn list_snapshots_with_stats(
+    env_id: String,
+    state: State<AppState>,
+) -> Result<Vec<SnapshotWithStats>, String> {
+    state::with_vault(&state, |v| v.list_snapshots_with_stats(&env_id))
+}
+
+/// `against` is `"previous"` (what this snapshot changed) or `"current"`
+/// (what restoring it would change).
+#[tauri::command]
+pub fn diff_snapshot(
+    snapshot_id: String,
+    against: String,
+    state: State<AppState>,
+) -> Result<Vec<DiffRow>, String> {
+    state::with_vault(&state, |v| v.diff_snapshot(&snapshot_id, &against))
+}
+
+#[tauri::command]
+pub fn restore_variable_from_snapshot(
+    snapshot_id: String,
+    key: String,
+    state: State<AppState>,
+) -> Result<(), String> {
+    state::with_vault(&state, |v| v.restore_variable_from_snapshot(&snapshot_id, &key))
+}
+
+#[tauri::command]
 pub fn restore_snapshot(snapshot_id: String, state: State<AppState>) -> Result<(), String> {
     state::with_vault(&state, |v| v.restore_snapshot(&snapshot_id))
 }
@@ -244,8 +427,15 @@ pub fn set_meta(key: String, value: String, state: State<AppState>) -> Result<()
 // ---------------------------------------------------------------------
 
 #[tauri::command]
-pub fn copy_secret_to_clipboard(app: tauri::AppHandle, text: String) -> Result<(), String> {
+pub fn copy_secret_to_clipboard(
+    app: tauri::AppHandle,
+    text: String,
+    state: State<AppState>,
+) -> Result<(), String> {
     app.clipboard().write_text(text.clone()).map_err(|e| e.to_string())?;
+    if let Ok(mut last) = state.last_copied.lock() {
+        *last = Some(text.clone());
+    }
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_secs(30));
         if let Ok(current) = app.clipboard().read_text() {

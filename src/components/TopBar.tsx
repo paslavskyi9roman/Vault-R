@@ -9,9 +9,20 @@ export function TopBar() {
   const exportEnv = useVaultStore((s) => s.exportEnv);
   const replayOnboarding = useVaultStore((s) => s.replayOnboarding);
   const lockVault = useVaultStore((s) => s.lockVault);
+  const openSettings = useVaultStore((s) => s.openSettings);
+  const needsMigration = useVaultStore((s) => s.needsMigration);
 
   return (
     <div style={topBarStyle}>
+      {needsMigration && (
+        <button
+          style={migrateHintStyle}
+          onClick={() => void openSettings()}
+          title="This vault uses the original storage format. Lock it and unlock with your master password to upgrade."
+        >
+          Upgrade available
+        </button>
+      )}
       <div style={logoWrapStyle}>
         <span style={logoGlyphStyle}>&#10095;_</span>
         <span style={logoTextStyle}>vault</span>
@@ -34,6 +45,13 @@ export function TopBar() {
         <button style={replayBtnStyle} onClick={replayOnboarding} title="Replay onboarding">
           ?
         </button>
+        <button
+          style={replayBtnStyle}
+          onClick={() => void openSettings()}
+          title="Vault settings, backups and recovery"
+        >
+          &#9881;
+        </button>
         <button style={lockBtnStyle} onClick={() => void lockVault()} title="Lock vault">
           &#128274;
         </button>
@@ -51,6 +69,19 @@ const topBarStyle: React.CSSProperties = {
   padding: '0 18px',
   borderBottom: '1px solid var(--border)',
   background: 'var(--panel)',
+};
+
+const migrateHintStyle: React.CSSProperties = {
+  order: 99,
+  fontSize: '11px',
+  fontWeight: 600,
+  color: 'var(--env-staging)',
+  background: 'transparent',
+  border: '1px solid var(--env-staging)',
+  borderRadius: '5px',
+  padding: '4px 9px',
+  cursor: 'pointer',
+  flexShrink: 0,
 };
 
 const logoWrapStyle: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: '7px', flexShrink: 0 };
