@@ -1,0 +1,164 @@
+.header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: 14px;
+}
+
+.title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+  flex: 1;
+}
+
+.pickerRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: 18px;
+}
+
+/* --env-tone comes from envColor() so the pill matches the sidebar. */
+.envPill {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--env-tone, var(--text));
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 5px;
+  padding: 5px 9px;
+  white-space: nowrap;
+}
+
+.vs {
+  font-size: 11.5px;
+  color: var(--text-faint);
+  flex-shrink: 0;
+}
+
+.envSelect {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  padding: var(--space-2) var(--space-3);
+  cursor: pointer;
+}
+
+.empty {
+  font-size: 12.5px;
+  color: var(--text-faint);
+}
+
+.section {
+  margin-bottom: 18px;
+}
+
+.sectionHeaderRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.sectionTitle {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-faint);
+  letter-spacing: 0.4px;
+  flex: 1;
+}
+
+.matchRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 7px 0;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.smallBtn {
+  font-size: 11px;
+  color: var(--accent);
+  padding: var(--space-1) var(--space-3);
+  border-radius: 5px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.smallBtn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.diffRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 7px 0;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.diffBody {
+  flex: 1;
+  min-width: 0;
+}
+
+.diffKey {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--key);
+}
+
+.diffValue {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diffBtn {
+  font-size: 10px;
+  padding: 3px var(--space-2);
+  border-radius: 4px;
+  flex-shrink: 0;
+  white-space: nowrap;
+  /* Row actions stay out of the way until the row is under the pointer or
+     holds focus, so a long diff reads as content rather than controls. */
+  opacity: 0;
+  transition:
+    opacity var(--t-hover),
+    background-color var(--t-hover),
+    border-color var(--t-hover),
+    color var(--t-hover);
+}
+
+.diffRow:hover .diffBtn,
+.diffRow:focus-within .diffBtn {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .diffBtn {
+    opacity: 1;
+  }
+}
+
+.skelRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 11px 0;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.skelBody {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
