@@ -1,0 +1,397 @@
+/* Shared chrome, global on purpose: keeping these out of CSS Modules lets each
+   component migrate on its own without a shared module coupling them together.
+   Layered so that unlayered component modules always win a specificity tie. */
+@layer primitives {
+  /* ---------- buttons ---------- */
+
+  .v-btn {
+    font-family: var(--font-sans);
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--text-dim);
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 7px 12px;
+    cursor: pointer;
+    transition:
+      background-color var(--t-hover),
+      border-color var(--t-hover),
+      color var(--t-hover),
+      box-shadow var(--t-hover),
+      opacity var(--t-hover);
+  }
+
+  .v-btn:hover {
+    background: var(--hover-overlay);
+    border-color: var(--border-hover);
+    color: var(--text);
+  }
+
+  .v-btn:active {
+    background: var(--press-overlay);
+    transition-duration: var(--dur-1);
+  }
+
+  .v-btn:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+  }
+
+  .v-btn:disabled {
+    opacity: 0.45;
+    cursor: default;
+    pointer-events: none;
+  }
+
+  .v-btn--primary {
+    color: #0b1210;
+    font-weight: 700;
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+
+  .v-btn--primary:hover {
+    color: #0b1210;
+    background: var(--accent-hover);
+    border-color: var(--accent-hover);
+  }
+
+  .v-btn--primary:active {
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+
+  .v-btn--danger {
+    color: var(--danger);
+  }
+
+  .v-btn--danger:hover {
+    color: var(--danger);
+    border-color: var(--danger);
+    background: rgba(240, 119, 110, 0.1);
+  }
+
+  .v-btn--danger:focus-visible {
+    box-shadow: var(--focus-ring-danger);
+  }
+
+  /* Bare text button: no chrome until you interact with it. */
+  .v-btn--ghost {
+    border-color: transparent;
+    background: transparent;
+  }
+
+  .v-btn--icon {
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border-radius: 50%;
+    font-size: 12px;
+    color: var(--text-faint);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .v-btn--block {
+    width: 100%;
+  }
+
+  /* Label stays in flow so the button keeps its width; the spinner is
+     overlaid rather than swapped in, which is what caused the old
+     "Unlock" -> "Please wait..." resize mid-click. */
+  .v-btn[data-pending='true'] {
+    position: relative;
+    color: transparent;
+    pointer-events: none;
+  }
+
+  .v-btn[data-pending='true'] > .v-spinner {
+    position: absolute;
+    inset: 0;
+    margin: auto;
+    color: var(--text-dim);
+  }
+
+  .v-btn--primary[data-pending='true'] > .v-spinner {
+    color: #0b1210;
+  }
+
+  /* ---------- fields ---------- */
+
+  .v-input {
+    width: 100%;
+    font-family: var(--font-sans);
+    font-size: 13px;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    padding: 8px 12px;
+    outline: none;
+    transition:
+      border-color var(--t-hover),
+      background-color var(--t-hover),
+      box-shadow var(--t-hover);
+  }
+
+  .v-input::placeholder {
+    color: var(--text-faint);
+  }
+
+  .v-input:hover {
+    border-color: var(--border-hover);
+  }
+
+  .v-input:focus-visible,
+  .v-input:focus {
+    border-color: var(--accent);
+    box-shadow: var(--focus-ring);
+  }
+
+  .v-input--mono {
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+  }
+
+  /* ---------- overlay chrome ---------- */
+
+  .v-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(6, 7, 10, 0.6);
+    z-index: var(--z-overlay);
+    opacity: 0;
+    transition: opacity var(--t-enter);
+  }
+
+  .v-backdrop.is-entered {
+    opacity: 1;
+  }
+
+  .v-backdrop.is-exiting {
+    opacity: 0;
+    transition: opacity var(--t-exit);
+  }
+
+  .v-backdrop--top {
+    z-index: var(--z-confirm);
+  }
+
+  /* Centring lives on the wrapper so `transform` on the modal itself is free
+     for animation. Pointer events pass through the wrapper to the backdrop. */
+  .v-modal-wrap {
+    position: fixed;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    padding: var(--space-6);
+    z-index: var(--z-overlay-content);
+    pointer-events: none;
+  }
+
+  .v-modal-wrap--top {
+    z-index: calc(var(--z-confirm) + 1);
+  }
+
+  .v-modal {
+    width: 440px;
+    max-width: 100%;
+    max-height: 100%;
+    overflow-y: auto;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: var(--elev-3);
+    padding: var(--space-6);
+    pointer-events: auto;
+    opacity: 0;
+    transform: scale(0.97);
+    transition:
+      opacity var(--t-enter),
+      transform var(--t-enter);
+    will-change: transform, opacity;
+  }
+
+  .v-modal.is-entered {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  .v-modal.is-exiting {
+    opacity: 0;
+    transform: scale(0.98);
+    transition:
+      opacity var(--t-exit),
+      transform var(--t-exit);
+  }
+
+  .v-modal--wide {
+    width: 560px;
+  }
+
+  .v-slideover {
+    position: fixed;
+    inset: 0 0 0 auto;
+    width: 380px;
+    max-width: 100%;
+    background: var(--panel);
+    border-left: 1px solid var(--border);
+    box-shadow: var(--elev-slideover);
+    z-index: var(--z-overlay-content);
+    padding: var(--space-6);
+    overflow-y: auto;
+    transform: translateX(100%);
+    transition: transform var(--t-panel);
+    will-change: transform;
+  }
+
+  .v-slideover.is-entered {
+    transform: translateX(0);
+  }
+
+  .v-slideover.is-exiting {
+    transform: translateX(100%);
+    transition: transform var(--t-exit);
+  }
+
+  .v-slideover--wide {
+    width: 560px;
+  }
+
+  .v-modal-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    margin-bottom: var(--space-1);
+  }
+
+  .v-modal-title {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--text);
+    flex: 1;
+  }
+
+  .v-modal-sub {
+    font-size: 12.5px;
+    color: var(--text-faint);
+    margin-bottom: 18px;
+  }
+
+  .v-close-x {
+    font-size: 18px;
+    line-height: 1;
+    color: var(--text-faint);
+    background: transparent;
+    border: none;
+    border-radius: 5px;
+    padding: 2px 6px;
+    cursor: pointer;
+    transition:
+      color var(--t-hover),
+      background-color var(--t-hover),
+      box-shadow var(--t-hover);
+  }
+
+  .v-close-x:hover {
+    color: var(--text);
+    background: var(--hover-overlay);
+  }
+
+  .v-close-x:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+  }
+
+  /* ---------- import surfaces ---------- */
+
+  .v-dropzone {
+    border: 1px dashed var(--border);
+    border-radius: 8px;
+    padding: 20px;
+    text-align: center;
+    margin-bottom: 10px;
+    transition:
+      border-color var(--t-hover),
+      background-color var(--t-hover);
+  }
+
+  .v-dropzone:hover,
+  .v-dropzone[data-dragging='true'] {
+    border-color: var(--accent);
+    background: var(--accent-dim);
+  }
+
+  .v-dropzone-text {
+    font-size: 12.5px;
+    color: var(--text-faint);
+  }
+
+  .v-or {
+    font-size: 11px;
+    color: var(--text-faint);
+    text-align: center;
+    margin: var(--space-1) 0;
+  }
+
+  .v-paste {
+    width: 100%;
+    min-height: 120px;
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    padding: 10px var(--space-4);
+    outline: none;
+    resize: vertical;
+    margin-bottom: var(--space-4);
+    transition:
+      border-color var(--t-hover),
+      box-shadow var(--t-hover);
+  }
+
+  .v-paste:focus-visible,
+  .v-paste:focus {
+    border-color: var(--accent);
+    box-shadow: var(--focus-ring);
+  }
+
+  /* ---------- feedback ---------- */
+
+  /* currentColor means this inherits whatever context it lands in, so no
+     primary/danger/dim variants are needed. */
+  .v-spinner {
+    display: inline-block;
+    width: var(--spinner-size, 14px);
+    height: var(--spinner-size, 14px);
+    border: 1.5px solid currentColor;
+    border-top-color: transparent;
+    border-radius: 50%;
+    opacity: 0.85;
+    flex-shrink: 0;
+    animation: vaultSpin 640ms linear infinite;
+  }
+
+  .v-skel {
+    display: block;
+    position: relative;
+    overflow: hidden;
+    border-radius: 4px;
+    background: var(--panel-3);
+  }
+
+  /* Sweep is a transform on a pseudo-element rather than an animated
+     background-position, so it stays on the compositor. */
+  .v-skel::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.05), transparent);
+    animation: vaultSkeleton 1400ms var(--ease-standard) infinite;
+  }
+}

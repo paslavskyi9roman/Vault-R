@@ -1,0 +1,35 @@
+/* One global escape hatch, imported last. Handling reduced motion per
+   animation drifts the moment someone adds the next one.
+
+   Unlayered and !important so it beats both the primitives layer and the
+   component modules. */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    animation-delay: 0ms !important;
+    transition-duration: 1ms !important;
+    transition-delay: 0ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  /* 1ms rather than 0s: some engines skip firing transitionend/animationend
+     entirely at 0s, which would hang anything that ever awaits them. */
+
+  /* Progress still has to read as in progress. A class selector outranks the
+     universal selector, so this wins even though both are !important. */
+  .v-spinner {
+    animation-duration: 1200ms !important;
+    animation-iteration-count: infinite !important;
+  }
+
+  /* Cross-fade instead of slide. Motion sensitivity is triggered by large
+     translations, not by state changes being visible at all. */
+  .v-slideover,
+  .v-modal {
+    transform: none !important;
+  }
+}

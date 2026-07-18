@@ -22,6 +22,58 @@
   --env-staging: #f0b35e;
   --env-production: #f0776e;
   --env-custom: #9096a3;
+
+  /* Durations scale with the distance travelled. Under ~100ms reads as
+     instant, over ~300ms reads as sluggish in an app you keep open all day. */
+  --dur-1: 90ms;
+  --dur-2: 140ms;
+  --dur-3: 200ms;
+  --dur-4: 260ms;
+  --dur-exit: 120ms;
+
+  /* Enter decelerates, so the element arrives and settles. Exit accelerates,
+     because nobody needs to watch something leave. */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+
+  --t-hover: var(--dur-2) var(--ease-standard);
+  --t-enter: var(--dur-3) var(--ease-out);
+  --t-panel: var(--dur-4) var(--ease-out);
+  --t-exit: var(--dur-exit) var(--ease-in);
+
+  /* On a dark surface a cast shadow alone barely reads, so each level pairs
+     one with a lit top edge. */
+  --edge-top: inset 0 1px 0 rgba(255, 255, 255, 0.045);
+  --elev-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --elev-2: 0 6px 16px -4px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(0, 0, 0, 0.3);
+  --elev-3: 0 20px 56px -16px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(0, 0, 0, 0.35);
+  --elev-slideover: -20px 0 56px -20px rgba(0, 0, 0, 0.6);
+
+  --hover-overlay: rgba(255, 255, 255, 0.045);
+  --press-overlay: rgba(0, 0, 0, 0.18);
+  --row-hover: rgba(255, 255, 255, 0.028);
+  --border-hover: #363a47;
+  --accent-hover: #6cf0b6;
+
+  /* The inset variant exists for elements inside `overflow: hidden`
+     containers, which clip an outset box-shadow ring. */
+  --focus-ring: 0 0 0 2px var(--bg), 0 0 0 4px rgba(88, 230, 168, 0.5);
+  --focus-ring-danger: 0 0 0 2px var(--bg), 0 0 0 4px rgba(240, 119, 110, 0.5);
+  --focus-ring-inset: inset 0 0 0 1px var(--accent);
+
+  --z-overlay: 40;
+  --z-overlay-content: 41;
+  --z-confirm: 60;
+  --z-toast: 70;
+
+  --space-1: 4px;
+  --space-2: 6px;
+  --space-3: 8px;
+  --space-4: 12px;
+  --space-5: 16px;
+  --space-6: 22px;
+  --space-7: 32px;
 }
 
 @keyframes vaultFadeIn {
@@ -41,5 +93,20 @@
   }
   to {
     transform: translateX(0);
+  }
+}
+
+@keyframes vaultSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes vaultSkeleton {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
   }
 }
