@@ -1,5 +1,6 @@
 import { useVaultStore } from '../store/useVaultStore';
-import { overlayBackdropStyle } from './overlayStyles';
+import { usePresence } from '../lib/usePresence';
+import styles from './CommandPalette.module.css';
 
 interface QuickAction {
   id: string;
@@ -19,7 +20,10 @@ export function CommandPalette() {
   const openHistory = useVaultStore((s) => s.openHistory);
   const openShare = useVaultStore((s) => s.openShare);
 
-  if (!cmdkOpen) return null;
+  // Shorter than the other overlays: this one gets dismissed constantly and
+  // any lag on the way out reads as sluggish.
+  const { mounted, state } = usePresence(cmdkOpen, 100);
+  if (!mounted) return null;
 
   const quickActions: QuickAction[] = [
     { id: 'a1', label: 'Import .env file', run: () => { closeCmdk(); openImport(); } },
@@ -29,76 +33,38 @@ export function CommandPalette() {
   ];
 
   const showingQuickActions = !cmdkQuery.trim();
+  const phase = state === 'entered' ? styles.isEntered : state === 'exiting' ? styles.isExiting : '';
 
   return (
     <>
-      <div style={overlayBackdropStyle} onClick={closeCmdk} />
-      <div style={paletteStyle}>
+      <div className={`v-backdrop is-${state}`} onClick={closeCmdk} />
+      <div className={`${styles.palette} ${phase}`}>
         <input
-          style={inputStyle}
+          className={`v-input ${styles.input}`}
           placeholder="Jump to a repo, environment, or secret&hellip;"
           value={cmdkQuery}
           onChange={(e) => void setCmdkQuery(e.target.value)}
           autoFocus
         />
-        <div style={resultsStyle}>
+        <div className={styles.results}>
           {showingQuickActions
             ? quickActions.map((a) => (
-                <div key={a.id} style={resultRowStyle} onClick={a.run}>
-                  <span style={resultLabelStyle}>{a.label}</span>
-                  <span style={resultSubStyle}>Action</span>
-                </div>
+                <button key={a.id} className={styles.resultRow} onClick={a.run}>
+                  <span className={styles.resultLabel}>{a.label}</span>
+                  <span className={styles.resultSub}>Action</span>
+                </button>
               ))
             : cmdkResults.map((r, i) => (
-                <div key={i} style={resultRowStyle} onClick={() => void cmdkSelectResult(r)}>
-                  <span style={resultLabelStyle}>{r.label}</span>
-                  <span style={resultSubStyle}>{r.sublabel}</span>
-                </div>
+                <button key={i} className={styles.resultRow} onClick={() => void cmdkSelectResult(r)}>
+                  <span className={styles.resultLabel}>{r.label}</span>
+                  <span className={styles.resultSub}>{r.sublabel}</span>
+                </button>
               ))}
           {!showingQuickActions && cmdkResults.length === 0 && (
-            <div style={emptyStyle}>No matches.</div>
+            <div className={styles.empty}>No matches.</div>
           )}
         </div>
       </div>
     </>
   );
 }
-
-const paletteStyle: React.CSSProperties = {
-  position: 'fixed',
-  top: '18%',
-  left: '50%',
-  transform: 'translateX(-50%)',
-  width: '520px',
-  maxWidth: '90vw',
-  background: 'var(--panel)',
-  border: '1px solid var(--border)',
-  borderRadius: '10px',
-  zIndex: 41,
-  padding: '10px',
-  animation: 'vaultFadeIn 0.15s ease',
-};
-const inputStyle: React.CSSProperties = {
-  width: '100%',
-  fontSize: '14px',
-  background: 'var(--panel-2)',
-  border: '1px solid var(--border)',
-  borderRadius: '7px',
-  color: 'var(--text)',
-  padding: '10px 12px',
-  outline: 'none',
-  boxSizing: 'border-box',
-  marginBottom: '6px',
-};
-const resultsStyle: React.CSSProperties = { display: 'flex', flexDirection: 'column' };
-const resultRowStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'space-between',
-  padding: '10px 10px',
-  borderRadius: '6px',
-  cursor: 'pointer',
-};
-const resultLabelStyle: React.CSSProperties = { fontFamily: 'var(--font-mono)', fontSize: '13px', color: 'var(--text)' };
-const resultSubStyle: React.CSSProperties = { fontSize: '11.5px', color: 'var(--text-faint)' };
-const emptyStyle: React.CSSProperties = { padding: '10px', fontSize: '12.5px', color: 'var(--text-faint)' };
