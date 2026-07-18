@@ -1,0 +1,433 @@
+/* Lock screen: what the app knows (left) and what it needs from you (right). */
+
+.auth-root {
+  height: 100vh;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  background: var(--bg);
+  background-image: radial-gradient(
+    900px 520px at 12% -10%,
+    rgba(88, 230, 168, 0.05),
+    transparent 70%
+  );
+  overflow-y: auto;
+}
+
+.auth-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 372px;
+  gap: 56px;
+  align-items: center;
+  width: 100%;
+  max-width: 880px;
+}
+
+/* ---- left pane: identity and manifest ---- */
+
+.auth-brand {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.auth-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.auth-wordmark {
+  font-family: var(--font-mono);
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: var(--text);
+  line-height: 1;
+}
+
+.auth-wordmark em {
+  font-style: normal;
+  color: var(--accent);
+}
+
+.auth-tagline {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-dim);
+  max-width: 34ch;
+}
+
+/* ---- the manifest ---- */
+
+.auth-manifest {
+  margin-top: 28px;
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+}
+
+.auth-manifest-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.auth-manifest-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.auth-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+}
+
+.auth-state svg {
+  width: 11px;
+  height: 11px;
+}
+
+.auth-state.is-sealed {
+  color: var(--accent);
+  background: var(--accent-dim);
+  border-color: rgba(88, 230, 168, 0.28);
+}
+
+.auth-state.is-missing {
+  color: var(--danger);
+  background: rgba(240, 119, 110, 0.12);
+  border-color: rgba(240, 119, 110, 0.3);
+}
+
+.auth-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.auth-row {
+  display: grid;
+  grid-template-columns: 74px minmax(0, 1fr);
+  gap: 14px;
+  align-items: baseline;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.auth-row dt {
+  color: var(--key);
+  letter-spacing: 0.04em;
+}
+
+.auth-row dd {
+  margin: 0;
+  color: var(--text-dim);
+  overflow-wrap: anywhere;
+}
+
+.auth-row dd strong {
+  font-weight: 500;
+  color: var(--text);
+}
+
+.auth-row dd .auth-warn {
+  color: var(--danger);
+}
+
+.auth-row,
+.auth-manifest-head {
+  animation: vaultFadeIn 0.34s ease both;
+}
+
+.auth-manifest-head {
+  animation-delay: 0.04s;
+}
+.auth-rows .auth-row:nth-child(1) {
+  animation-delay: 0.1s;
+}
+.auth-rows .auth-row:nth-child(2) {
+  animation-delay: 0.14s;
+}
+.auth-rows .auth-row:nth-child(3) {
+  animation-delay: 0.18s;
+}
+.auth-rows .auth-row:nth-child(4) {
+  animation-delay: 0.22s;
+}
+.auth-rows .auth-row:nth-child(5) {
+  animation-delay: 0.26s;
+}
+
+/* ---- right pane: the form ---- */
+
+.auth-card {
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 30px 28px;
+  animation: vaultFadeIn 0.3s ease both;
+}
+
+.auth-title {
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+.auth-sub {
+  margin-top: 8px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-dim);
+}
+
+.auth-field {
+  margin-top: 18px;
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.auth-field + .auth-field {
+  margin-top: 10px;
+}
+
+.auth-input {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  padding: 11px 13px;
+  width: 100%;
+  outline: none;
+  transition: border-color 0.14s ease, box-shadow 0.14s ease;
+}
+
+.auth-input::placeholder {
+  color: var(--text-faint);
+}
+
+.auth-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-dim);
+}
+
+.auth-input.has-toggle {
+  padding-right: 42px;
+}
+
+.auth-reveal {
+  position: absolute;
+  right: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  transition: color 0.14s ease, background 0.14s ease;
+}
+
+.auth-reveal:hover {
+  color: var(--text-dim);
+  background: var(--panel-3);
+}
+
+.auth-reveal svg {
+  width: 15px;
+  height: 15px;
+}
+
+.auth-remember {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: 16px;
+  font-size: 12.5px;
+  color: var(--text-dim);
+  cursor: pointer;
+  user-select: none;
+}
+
+.auth-remember input {
+  accent-color: var(--accent);
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+}
+
+.auth-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 16px;
+  padding: 10px 12px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--danger);
+  background: rgba(240, 119, 110, 0.09);
+  border: 1px solid rgba(240, 119, 110, 0.24);
+  border-radius: 8px;
+}
+
+.auth-error svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  margin-top: 1px;
+}
+
+.auth-submit {
+  margin-top: 20px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #0b1210;
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  padding: 11px 14px;
+  cursor: pointer;
+  transition: filter 0.14s ease, opacity 0.14s ease;
+}
+
+.auth-submit:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.auth-submit:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* ---- recovery routes ---- */
+
+.auth-routes {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.auth-routes-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin-bottom: 8px;
+}
+
+.auth-route {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  margin-left: -10px;
+  font-size: 12.5px;
+  text-align: left;
+  color: var(--text-dim);
+  background: transparent;
+  border: none;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: color 0.14s ease, background 0.14s ease;
+}
+
+.auth-route:hover {
+  color: var(--text);
+  background: var(--panel-2);
+}
+
+.auth-route svg {
+  width: 13px;
+  height: 13px;
+  flex: none;
+  color: var(--text-faint);
+}
+
+.auth-route:hover svg {
+  color: var(--accent);
+}
+
+/* ---- focus floor ---- */
+
+.auth-root :focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.auth-input:focus-visible {
+  outline: none;
+}
+
+/* ---- narrow windows ---- */
+
+@media (max-width: 900px) {
+  .auth-root {
+    align-items: flex-start;
+    padding: 40px 24px;
+  }
+
+  .auth-shell {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 32px;
+    max-width: 420px;
+  }
+
+  /* The form is the job; the manifest is context. Order follows priority. */
+  .auth-brand {
+    order: 2;
+  }
+
+  .auth-card {
+    order: 1;
+  }
+
+  .auth-manifest {
+    margin-top: 20px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .auth-card,
+  .auth-row,
+  .auth-manifest-head {
+    animation: none;
+  }
+}

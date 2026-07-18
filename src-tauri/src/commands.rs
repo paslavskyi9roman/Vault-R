@@ -8,7 +8,7 @@ use vault_core::models::{
     DiffRow, Environment, GroupMember, Member, ProjectInfo, Repo, RepoSummary, SearchResult,
     Snapshot, SnapshotWithStats, UnlinkedMatch, Variable, VariableWithUsage,
 };
-use vault_core::Vault;
+use vault_core::{Vault, VaultStatus};
 
 fn stringify(e: vault_core::VaultError) -> String {
     e.to_string()
@@ -21,6 +21,11 @@ fn stringify(e: vault_core::VaultError) -> String {
 #[tauri::command]
 pub fn vault_exists() -> Result<bool, String> {
     Vault::exists().map_err(stringify)
+}
+
+#[tauri::command]
+pub fn vault_status() -> Result<VaultStatus, String> {
+    Vault::status().map_err(stringify)
 }
 
 /// Tries to unlock silently using a key remembered in the OS keychain.

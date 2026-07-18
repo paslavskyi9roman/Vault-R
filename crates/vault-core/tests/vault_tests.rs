@@ -1724,3 +1724,49 @@ fn scanning_linked_projects_covers_every_linked_folder() {
     assert_eq!(reports.len(), 2);
     assert_eq!(reports.iter().filter(|r| r.has_findings()).count(), 1);
 }
+
+#[test]
+fn status_reports_no_vault_for_an_empty_directory() {
+    let dir = temp_dir();
+    let status = Vault::status_in(dir.path()).unwrap();
+
+    assert!(!status.exists);
+    assert_eq!(status.format, None);
+    assert_eq!(status.backup_count, 0);
+    assert_eq!(status.dir, dir.path().to_string_lossy());
+    assert_eq!(status.file_name, "vault.db.enc");
+}
+
+#[test]
+fn status_reports_a_current_vault_as_v2() {
+    let dir = temp_dir();
+    Vault::create_in(dir.path(), "correct horse battery staple").unwrap();
+
+    let status = Vault::status_in(dir.path()).unwrap();
+    assert!(status.exists);
+    assert_eq!(status.format, Some(2));
+    assert!(status.bytes > 0);
+    assert!(status.modified_ms.is_some());
+}
+
+#[test]
+fn status_reports_a_legacy_vault_as_v1() {
+    let dir = temp_dir();
+    write_legacy_v1_vault(dir.path(), "pw", |vault| {
+        vault.create_repo("api-gateway").unwrap();
+    });
+
+    let status = Vault::status_in(dir.path()).unwrap();
+    assert!(status.exists);
+    assert_eq!(status.format, Some(1));
+}
+
+#[test]
+fn status_counts_automatic_backups() {
+    let dir = temp_dir();
+    let vault = Vault::create_in(dir.path(), "pw").unwrap();
+    assert_eq!(Vault::status_in(dir.path()).unwrap().backup_count, 0);
+
+    vault.rotate_backup().unwrap();
+    assert_eq!(Vault::status_in(dir.path()).unwrap().backup_count, 1);
+}

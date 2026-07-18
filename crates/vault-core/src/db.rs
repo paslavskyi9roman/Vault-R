@@ -112,6 +112,31 @@ fn blob_file_path(dir: &Path) -> PathBuf {
     dir.join("vault.db.enc")
 }
 
+/// A file shorter than `head` is not an error — it just is not a v2 vault.
+fn read_head(path: &Path, head: &mut [u8]) -> std::io::Result<usize> {
+    use std::io::Read;
+    let mut file = fs::File::open(path)?;
+    let mut filled = 0;
+    while filled < head.len() {
+        match file.read(&mut head[filled..])? {
+            0 => break,
+            n => filled += n,
+        }
+    }
+    Ok(filled)
+}
+
+fn count_backups(dir: &Path) -> usize {
+    fs::read_dir(dir.join("backups"))
+        .map(|entries| {
+            entries
+                .filter_map(|e| e.ok())
+                .filter(|e| e.path().is_file())
+                .count()
+        })
+        .unwrap_or(0)
+}
+
 /// Earlier builds decrypted the vault into this plaintext working file. It is
 /// no longer created, but a stale one from a prior version would still contain
 /// every secret in the clear — delete it whenever we touch the vault.
@@ -282,9 +307,73 @@ fn migrate(conn: &Connection) -> Result<bool> {
     apply_migrations(conn, MIGRATIONS, SCHEMA_VERSION)
 }
 
+/// What the app can learn about the vault on disk without unlocking it, so the
+/// lock screen can show the directory it searched rather than only reporting
+/// that it found nothing.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VaultStatus {
+    pub dir: String,
+    pub file_name: String,
+    pub exists: bool,
+    /// 1 for a legacy vault, 2 for the current one, `None` when there is no file.
+    pub format: Option<u32>,
+    pub bytes: u64,
+    pub modified_ms: Option<u64>,
+    pub backup_count: usize,
+}
+
 impl Vault {
     pub fn exists() -> Result<bool> {
         paths::vault_exists()
+    }
+
+    pub fn status() -> Result<VaultStatus> {
+        Self::status_in(&paths::data_dir()?)
+    }
+
+    pub fn status_in(dir: &Path) -> Result<VaultStatus> {
+        let blob_path = blob_file_path(dir);
+        let file_name = blob_path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+
+        let status = VaultStatus {
+            dir: dir.to_string_lossy().into_owned(),
+            file_name,
+            exists: blob_path.exists(),
+            format: None,
+            bytes: 0,
+            modified_ms: None,
+            backup_count: count_backups(dir),
+        };
+        if !status.exists {
+            return Ok(status);
+        }
+
+        let meta = fs::metadata(&blob_path)?;
+        let modified_ms = meta
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_millis() as u64);
+
+        // Only the leading bytes distinguish the formats, so a large vault is
+        // never read into memory just to render a screen.
+        let mut head = [0u8; 8];
+        let format = match read_head(&blob_path, &mut head) {
+            Ok(read) if read == MAGIC.len() && &head == MAGIC => Some(2),
+            Ok(_) => Some(1),
+            Err(_) => None,
+        };
+
+        Ok(VaultStatus {
+            format,
+            bytes: meta.len(),
+            modified_ms,
+            ..status
+        })
     }
 
     /// Creates a brand-new vault protected by `password` at the standard
