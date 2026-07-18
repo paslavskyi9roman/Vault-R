@@ -17,6 +17,8 @@ import { GeneratorPopover } from './components/GeneratorPopover';
 import { Onboarding } from './components/Onboarding';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import { Toast } from './components/Toast';
+import { Spinner } from './components/Spinner';
+import styles from './App.module.css';
 
 /// Locks the vault after `minutes` with no keyboard or pointer activity.
 /// 0 disables it. Activity is recorded into a ref rather than state so that
@@ -77,7 +79,15 @@ function App() {
   }, [toggleCmdk, closeAllOverlays]);
 
   if (checkingVault) {
-    return <div style={loadingStyle} />;
+    return (
+      <div className={styles.splash}>
+        <div className={styles.splashInner}>
+          <span className={styles.splashGlyph}>&#10095;_</span>
+          <span className={styles.splashText}>vault</span>
+        </div>
+        <Spinner size={13} className={styles.splashSpinner} />
+      </div>
+    );
   }
 
   if (locked) {
@@ -101,9 +111,9 @@ function App() {
   }
 
   return (
-    <div style={rootStyle}>
+    <div className={styles.root}>
       <TopBar />
-      <div style={bodyStyle}>
+      <div className={styles.body}>
         <Sidebar />
         <MainPanel />
       </div>
@@ -124,18 +134,5 @@ function App() {
     </div>
   );
 }
-
-const rootStyle: React.CSSProperties = {
-  height: '100vh',
-  width: '100%',
-  display: 'flex',
-  flexDirection: 'column',
-  background: 'var(--bg)',
-  color: 'var(--text)',
-  overflow: 'hidden',
-  position: 'relative',
-};
-const bodyStyle: React.CSSProperties = { flex: 1, display: 'flex', overflow: 'hidden' };
-const loadingStyle: React.CSSProperties = { height: '100vh', width: '100%', background: 'var(--bg)' };
 
 export default App;
