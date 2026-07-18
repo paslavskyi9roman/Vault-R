@@ -12,6 +12,7 @@ pub fn run() {
         .manage(AppState::default())
         .invoke_handler(tauri::generate_handler![
             commands::vault_exists,
+            commands::vault_status,
             commands::vault_try_keychain,
             commands::vault_create,
             commands::vault_unlock,

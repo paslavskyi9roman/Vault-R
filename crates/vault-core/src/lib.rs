@@ -9,5 +9,5 @@ pub mod models;
 pub mod paths;
 mod store;
 
-pub use db::Vault;
+pub use db::{Vault, VaultStatus};
 pub use error::{Result, VaultError};

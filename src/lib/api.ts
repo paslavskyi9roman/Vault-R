@@ -171,8 +171,20 @@ export interface ProjectInfo {
   createdAt: string;
 }
 
+/// What the app can see of the vault on disk before anything is unlocked.
+export interface VaultStatus {
+  dir: string;
+  fileName: string;
+  exists: boolean;
+  format: number | null;
+  bytes: number;
+  modifiedMs: number | null;
+  backupCount: number;
+}
+
 export const api = {
   vaultExists: () => invoke<boolean>('vault_exists'),
+  vaultStatus: () => invoke<VaultStatus>('vault_status'),
   vaultTryKeychain: () => invoke<boolean>('vault_try_keychain'),
   vaultCreate: (password: string, remember: boolean) =>
     invoke<void>('vault_create', { password, remember }),
