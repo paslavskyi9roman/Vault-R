@@ -81,11 +81,13 @@ function App() {
   if (checkingVault) {
     return (
       <div className={styles.splash}>
-        <div className={styles.splashInner}>
+        <div className={`${styles.splashInner} v-enter`}>
           <span className={styles.splashGlyph}>&#10095;_</span>
           <span className={styles.splashText}>vault</span>
         </div>
-        <Spinner size={13} className={styles.splashSpinner} />
+        <span className={`${styles.splashSpinnerWrap} v-enter`}>
+          <Spinner size={13} />
+        </span>
       </div>
     );
   }

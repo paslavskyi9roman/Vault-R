@@ -48,7 +48,7 @@ export function UnlockScreen() {
   if (recoveryMode) {
     return (
       <div className={styles.root}>
-        <form className={styles.card} onSubmit={handleSubmit}>
+        <form className={`${styles.card} v-enter`} onSubmit={handleSubmit}>
           <div className={styles.glyph}>&#10095;_</div>
           <div className={styles.title}>Use your recovery code</div>
           <div className={styles.sub}>
@@ -84,7 +84,7 @@ export function UnlockScreen() {
 
   return (
     <div className={styles.root}>
-      <form className={styles.card} onSubmit={handleSubmit}>
+      <form className={`${styles.card} v-enter`} onSubmit={handleSubmit}>
         <div className={styles.glyph}>&#10095;_</div>
         <div className={styles.title}>{isCreate ? 'Create your vault' : 'Unlock vault'}</div>
         <div className={styles.sub}>
@@ -174,7 +174,7 @@ export function ResetPasswordScreen() {
 
   return (
     <div className={styles.root}>
-      <form className={styles.card} onSubmit={handleSubmit}>
+      <form className={`${styles.card} v-enter`} onSubmit={handleSubmit}>
         <div className={styles.glyph}>&#10095;_</div>
         <div className={styles.title}>Set a new master password</div>
         <div className={styles.sub}>

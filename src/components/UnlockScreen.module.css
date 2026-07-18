@@ -19,7 +19,7 @@
   border: 1px solid var(--border);
   border-radius: 12px;
   box-shadow: var(--edge-top), var(--elev-3);
-  animation: vaultFadeIn var(--dur-4) var(--ease-out);
+  --enter-dur: var(--dur-4);
 }
 
 .glyph {

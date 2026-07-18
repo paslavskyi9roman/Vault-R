@@ -361,6 +361,20 @@
     box-shadow: var(--focus-ring);
   }
 
+  /* ---------- entrance ---------- */
+
+  /* Lives here rather than in each module on purpose. A CSS Module hashes any
+     keyframe name it references, so `animation: vaultFadeIn` inside a module
+     silently resolves to a name that does not exist — and an element starting
+     at opacity 0 then stays invisible forever. Keeping the keyframe reference
+     in this global file avoids that entirely.
+
+     `both` fill applies the start frame during the delay too, so callers do
+     not need their own opacity: 0. */
+  .v-enter {
+    animation: vaultFadeIn var(--enter-dur, var(--dur-3)) var(--ease-out) var(--enter-delay, 0ms) both;
+  }
+
   /* ---------- feedback ---------- */
 
   /* currentColor means this inherits whatever context it lands in, so no

@@ -26,14 +26,14 @@
   gap: 18px;
 }
 
-/* Held back until the unlock check has visibly taken a moment. A vault that
-   opens quickly should show nothing at all rather than flash a splash. */
+/* Held back (via .v-enter's --enter-delay) until the unlock check has visibly
+   taken a moment. A vault that opens quickly should show nothing at all
+   rather than flash a splash. */
 .splashInner {
   display: flex;
   align-items: center;
   gap: 7px;
-  opacity: 0;
-  animation: vaultFadeIn var(--dur-3) var(--ease-out) 260ms forwards;
+  --enter-delay: 260ms;
 }
 
 .splashGlyph {
@@ -51,8 +51,9 @@
   letter-spacing: 0.3px;
 }
 
-.splashSpinner {
+/* The fade lives on a wrapper rather than the spinner: an `animation` on
+   .v-spinner itself would replace its rotation. */
+.splashSpinnerWrap {
   color: var(--text-faint);
-  opacity: 0;
-  animation: vaultFadeIn var(--dur-3) var(--ease-out) 420ms forwards;
+  --enter-delay: 420ms;
 }

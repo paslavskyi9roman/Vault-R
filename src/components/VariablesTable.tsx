@@ -143,7 +143,7 @@ function SelectionActionBar({ count }: { count: number }) {
   );
 
   return (
-    <div className={styles.selectionBar}>
+    <div className={`${styles.selectionBar} v-enter`}>
       <span className={styles.selectionCount}>{count} selected</span>
       <button
         className={`v-btn ${styles.selectionBtn}`}
@@ -359,7 +359,7 @@ function VariableDetail({ variable }: { variable: VariableWithUsage }) {
   }
 
   return (
-    <div className={styles.detailRow}>
+    <div className={`${styles.detailRow} v-enter`}>
       <textarea
         className={`v-input ${styles.detailTextarea}`}
         placeholder="What is this for? (e.g. get this from the Stripe dashboard)"
