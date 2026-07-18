@@ -1,0 +1,392 @@
+.searchRow {
+  margin-bottom: 10px;
+}
+
+.searchInput {
+  max-width: 360px;
+}
+
+.table {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  /* Clips the corner radius — which also clips outset focus rings on the
+     first and last rows, so everything inside uses an inset ring. */
+  overflow: hidden;
+}
+
+.headerRow {
+  display: flex;
+  background: var(--panel-2);
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-light);
+  transition: background-color var(--t-hover);
+}
+
+.row:hover {
+  background: var(--row-hover);
+}
+
+.row[data-selected='true'] {
+  background: var(--accent-dim);
+}
+
+.addRow {
+  display: flex;
+  align-items: center;
+  padding: 10px 14px;
+  border-top: 1px dashed var(--border);
+  background: rgba(255, 255, 255, 0.015);
+}
+
+.emptyRow {
+  padding: 18px 14px;
+  font-size: 12.5px;
+  color: var(--text-faint);
+  text-align: center;
+}
+
+/* ---- columns (widths are load-bearing at the 860px minimum window) ---- */
+
+.colCheck {
+  width: 24px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+
+.colKey {
+  width: 24%;
+  padding-right: 10px;
+}
+
+.colValue {
+  width: 42%;
+  padding-right: 10px;
+}
+
+.colLinked {
+  width: 16%;
+}
+
+.colActions {
+  width: 16%;
+  display: flex;
+  gap: var(--space-2);
+  justify-content: flex-end;
+}
+
+.headerRow .colKey,
+.headerRow .colValue,
+.headerRow .colLinked,
+.headerRow .colActions {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--text-faint);
+  letter-spacing: 0.5px;
+}
+
+/* ---- key cell ---- */
+
+.keyRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.keyText {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--key);
+  font-weight: 600;
+  cursor: text;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  padding: 2px 5px;
+  margin: -2px -5px;
+  text-align: left;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: background-color var(--t-hover);
+}
+
+.keyText:hover {
+  background: var(--hover-overlay);
+}
+
+.keyText:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring-inset);
+}
+
+.keyInput {
+  width: 100%;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--key);
+  font-weight: 600;
+  background: var(--panel-2);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  outline: none;
+  padding: 2px 5px;
+}
+
+.requiredBadge {
+  color: var(--danger);
+  font-size: 12px;
+  cursor: default;
+  flex-shrink: 0;
+}
+
+/* ---- value cell ---- */
+
+.valueInput {
+  width: 100%;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  outline: none;
+  padding: 2px 5px;
+  margin: 0 -5px;
+  transition:
+    background-color var(--t-hover),
+    border-color var(--t-hover);
+}
+
+.valueInput:hover {
+  background: var(--panel-2);
+}
+
+.valueInput:focus,
+.valueInput:focus-visible {
+  background: var(--panel-2);
+  border-color: var(--accent);
+}
+
+/* Masked values sit back; a revealed one reads as live text. */
+.valueInput[data-revealed='false'] {
+  color: var(--text-dim);
+  letter-spacing: 0.06em;
+}
+
+.linkedPill {
+  font-size: 10.5px;
+  color: var(--accent);
+  background: var(--accent-dim);
+  border: 1px solid transparent;
+  border-radius: 5px;
+  padding: 2px 7px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    border-color var(--t-hover),
+    background-color var(--t-hover);
+}
+
+.linkedPill:hover {
+  border-color: var(--accent);
+}
+
+.linkedPill:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring-inset);
+}
+
+/* ---- row actions ---- */
+
+.rowBtn {
+  font-size: 11px;
+  padding: var(--space-1) var(--space-3);
+  border-radius: 5px;
+  white-space: nowrap;
+}
+
+.rowBtn:focus-visible {
+  box-shadow: var(--focus-ring-inset);
+  border-color: var(--accent);
+}
+
+/* Six buttons on every row is a wall of controls. They fade in for the row
+   you are actually on, and stay put for keyboard users via focus-within. */
+.rowActions {
+  opacity: 0;
+  transition: opacity var(--t-hover);
+}
+
+.row:hover .rowActions,
+.row:focus-within .rowActions,
+.row[data-selected='true'] .rowActions {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .rowActions {
+    opacity: 1;
+  }
+}
+
+.addKeyInput,
+.addValueInput {
+  width: 100%;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  outline: none;
+  padding: 2px 5px;
+  margin: 0 -5px;
+  transition:
+    background-color var(--t-hover),
+    border-color var(--t-hover);
+}
+
+.addKeyInput {
+  color: var(--key);
+}
+
+.addValueInput {
+  color: var(--text);
+}
+
+.addKeyInput:focus,
+.addValueInput:focus {
+  background: var(--panel-2);
+  border-color: var(--accent);
+}
+
+.addBtn {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent);
+  padding: var(--space-1) 10px;
+  border-radius: 5px;
+}
+
+.addBtn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+
+/* ---- detail row ---- */
+
+.detailRow {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: 10px 14px 14px;
+  border-bottom: 1px solid var(--border-light);
+  background: rgba(255, 255, 255, 0.015);
+  animation: vaultFadeIn var(--dur-3) var(--ease-out);
+}
+
+.detailTextarea {
+  width: 100%;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  padding: var(--space-3) 10px;
+  resize: vertical;
+}
+
+.detailLabel {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.detailRotationInput {
+  width: 58px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  border-radius: 5px;
+  padding: 3px var(--space-2);
+}
+
+/* ---- selection bar ---- */
+
+.selectionBar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-3);
+  background: var(--accent-dim);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  animation: vaultFadeIn var(--dur-3) var(--ease-out);
+}
+
+.selectionCount {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--text);
+  margin-right: var(--space-1);
+}
+
+.selectionBtn {
+  font-size: 11.5px;
+  background: var(--panel);
+  padding: 5px 10px;
+}
+
+.selectionBtnDanger {
+  margin-left: auto;
+}
+
+.selectionSelect {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  background: var(--panel);
+  padding: 5px var(--space-3);
+  width: auto;
+  cursor: pointer;
+}
+
+.selectionClear {
+  font-size: 13px;
+  color: var(--text-faint);
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  padding: 5px;
+  transition:
+    color var(--t-hover),
+    background-color var(--t-hover);
+}
+
+.selectionClear:hover {
+  color: var(--text);
+  background: var(--hover-overlay);
+}
+
+.selectionClear:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* ---- loading ---- */
+
+.skelRow {
+  display: flex;
+  align-items: center;
+  padding: 13px 14px;
+  border-bottom: 1px solid var(--border-light);
+}

@@ -65,6 +65,7 @@ interface VaultState {
   activeEnvId: string | null;
   expandedRepos: Record<string, boolean>;
   variables: VariableWithUsage[];
+  varsLoading: boolean;
   revealed: Record<string, boolean>;
   varSearch: string;
   linkedGroupCount: number;
@@ -350,6 +351,7 @@ export const useVaultStore = create<VaultState>((set, get) => ({
   activeEnvId: null,
   expandedRepos: {},
   variables: [],
+  varsLoading: false,
   revealed: {},
   varSearch: '',
   linkedGroupCount: 0,
@@ -574,16 +576,25 @@ export const useVaultStore = create<VaultState>((set, get) => ({
     }
   },
 
+  /// Clears `variables` before fetching rather than after: leaving them in
+  /// place renders the previous environment's secrets under the new
+  /// environment's name until the fetch lands.
   selectEnv: async (repoId, envId) => {
     set({
       activeRepoId: repoId,
       activeEnvId: envId,
+      variables: [],
+      varsLoading: true,
       varSearch: '',
       expandedVarId: null,
       selectedVarIds: {},
       bulkMoveTargetId: null,
     });
-    await get().refreshVariables();
+    try {
+      await get().refreshVariables();
+    } finally {
+      set({ varsLoading: false });
+    }
   },
 
   toggleExpandRepo: (repoId) =>
