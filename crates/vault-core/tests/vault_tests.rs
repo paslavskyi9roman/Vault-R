@@ -1054,7 +1054,7 @@ fn required_and_empty_fails_check_required_and_set_passes() {
     let required_var = vault.add_variable(&env.id, "REQUIRED_KEY", "").unwrap();
     vault.add_variable(&env.id, "OPTIONAL_KEY", "").unwrap();
 
-    vault.set_variable_metadata(&required_var.id, Some("needed for X"), true).unwrap();
+    vault.set_variable_metadata(&required_var.id, Some("needed for X"), true, None).unwrap();
 
     let missing = vault.required_and_empty(&env.id).unwrap();
     assert_eq!(missing.len(), 1);
@@ -1071,7 +1071,7 @@ fn whitespace_only_value_still_counts_as_empty_for_required() {
     let repo = vault.create_repo("r").unwrap();
     let env = vault.create_environment(&repo.id, "local").unwrap();
     let v = vault.add_variable(&env.id, "K", "   ").unwrap();
-    vault.set_variable_metadata(&v.id, None, true).unwrap();
+    vault.set_variable_metadata(&v.id, None, true, None).unwrap();
 
     assert_eq!(vault.required_and_empty(&env.id).unwrap().len(), 1);
 }
@@ -1084,7 +1084,7 @@ fn descriptions_and_required_survive_export_import_round_trip_but_export_omits_t
     let env = vault.create_environment(&repo.id, "local").unwrap();
     let v = vault.add_variable(&env.id, "KEY", "value").unwrap();
     vault
-        .set_variable_metadata(&v.id, Some("get this from the dashboard"), true)
+        .set_variable_metadata(&v.id, Some("get this from the dashboard"), true, None)
         .unwrap();
 
     let exported = vault.export_env_text(&env.id).unwrap();
@@ -1119,7 +1119,7 @@ fn setting_metadata_does_not_propagate_across_a_link_group() {
     let b = vault.add_variable(&env_b.id, "K", "v").unwrap();
     vault.link_variables(&[a.id.clone(), b.id.clone()]).unwrap();
 
-    vault.set_variable_metadata(&a.id, Some("only on A"), true).unwrap();
+    vault.set_variable_metadata(&a.id, Some("only on A"), true, None).unwrap();
 
     let a_after = vault.list_variables(&env_a.id).unwrap();
     let b_after = vault.list_variables(&env_b.id).unwrap();
@@ -1135,7 +1135,7 @@ fn setting_metadata_on_a_missing_variable_is_reported() {
     let dir = temp_dir();
     let vault = Vault::create_in(dir.path(), "pw").unwrap();
     assert!(matches!(
-        vault.set_variable_metadata("nope", Some("x"), true).unwrap_err(),
+        vault.set_variable_metadata("nope", Some("x"), true, None).unwrap_err(),
         VaultError::Missing(_)
     ));
 }
@@ -1547,4 +1547,180 @@ fn a_truncated_or_tampered_vault_file_fails_cleanly() {
     // and the untouched original still opens
     std::fs::write(&path, &original).unwrap();
     Vault::open_in(dir.path(), "pw").unwrap();
+}
+
+// ---------------------------------------------------------------------
+// Git leak guard
+// ---------------------------------------------------------------------
+
+/// Runs git in `dir`, panicking on failure — the leak-guard tests need a real
+/// repository, because the whole feature is "what does git actually see".
+fn git(dir: &std::path::Path, args: &[&str]) {
+    let status = std::process::Command::new("git")
+        .current_dir(dir)
+        .args(args)
+        .output()
+        .expect("git must be installed to run the leak-guard tests");
+    assert!(status.status.success(), "git {args:?} failed");
+}
+
+/// A git repository with `files` written and everything committed. Identity
+/// and default branch are set locally so the tests do not depend on the
+/// developer's global git config.
+fn git_repo_with(files: &[(&str, &str)]) -> tempfile::TempDir {
+    let dir = temp_dir();
+    git(dir.path(), &["init", "--initial-branch=main"]);
+    git(dir.path(), &["config", "user.email", "test@example.com"]);
+    git(dir.path(), &["config", "user.name", "Test"]);
+    for (name, contents) in files {
+        let path = dir.path().join(name);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(&path, contents).unwrap();
+    }
+    git(dir.path(), &["add", "-A"]);
+    git(dir.path(), &["commit", "-m", "initial"]);
+    dir
+}
+
+#[test]
+fn a_tracked_dotenv_file_is_flagged_and_an_example_is_not() {
+    let vault_dir = temp_dir();
+    let vault = Vault::create_in(vault_dir.path(), "pw").unwrap();
+    let repo = git_repo_with(&[
+        (".env", "API_KEY=sk_live_9f2b1ce7a4d8\n"),
+        (".env.example", "API_KEY=your-api-key\n"),
+    ]);
+
+    let report = vault.scan_directory(repo.path()).unwrap();
+    let env_findings: Vec<_> = report
+        .findings
+        .iter()
+        .filter(|f| f.kind == "trackedEnvFile")
+        .collect();
+    assert_eq!(env_findings.len(), 1, "only the real .env should be flagged");
+    assert_eq!(env_findings[0].path, ".env");
+    assert_eq!(env_findings[0].severity, "critical");
+    // .gitignore cannot undo history, so the finding must say the value is burnt
+    assert!(env_findings[0].needs_rotation);
+    assert_eq!(env_findings[0].fix_pattern.as_deref(), Some("/.env"));
+}
+
+#[test]
+fn a_vault_value_pasted_into_a_tracked_file_is_found_without_exposing_it() {
+    let vault_dir = temp_dir();
+    let vault = Vault::create_in(vault_dir.path(), "pw").unwrap();
+    let repo_row = vault.create_repo("api-gateway").unwrap();
+    let env = vault.create_environment(&repo_row.id, "production").unwrap();
+    let secret = "sk_live_51H8xQ2eZvKYlo2Cx9fA";
+    vault.add_variable(&env.id, "STRIPE_SECRET_KEY", secret).unwrap();
+
+    let repo = git_repo_with(&[(
+        "docker-compose.yml",
+        &format!("services:\n  api:\n    environment:\n      STRIPE={secret}\n"),
+    )]);
+
+    let report = vault.scan_directory(repo.path()).unwrap();
+    let hit = report
+        .findings
+        .iter()
+        .find(|f| f.kind == "trackedValue")
+        .expect("the pasted value should be found");
+    assert_eq!(hit.path, "docker-compose.yml");
+    assert_eq!(hit.line, Some(4));
+    assert_eq!(hit.key.as_deref(), Some("STRIPE_SECRET_KEY"));
+    assert_eq!(hit.repo_name.as_deref(), Some("api-gateway"));
+    assert_eq!(hit.env_name.as_deref(), Some("production"));
+
+    // The report is the artifact a user screenshots: the value must not be in
+    // any part of it, not even the prose.
+    let serialized = serde_json::to_string(&report).unwrap();
+    assert!(!serialized.contains(secret), "a finding must never carry the value");
+}
+
+#[test]
+fn short_and_placeholder_values_do_not_produce_matches() {
+    let vault_dir = temp_dir();
+    let vault = Vault::create_in(vault_dir.path(), "pw").unwrap();
+    let repo_row = vault.create_repo("api-gateway").unwrap();
+    let env = vault.create_environment(&repo_row.id, "local").unwrap();
+    vault.add_variable(&env.id, "PORT", "3000").unwrap();
+    vault.add_variable(&env.id, "NODE_ENV", "production").unwrap();
+    vault.add_variable(&env.id, "API_KEY", "changeme").unwrap();
+
+    let repo = git_repo_with(&[(
+        "README.md",
+        "Runs on port 3000 in production. Set API_KEY=changeme to get started.\n",
+    )]);
+
+    let report = vault.scan_directory(repo.path()).unwrap();
+    assert!(
+        report.findings.iter().all(|f| f.kind != "trackedValue"),
+        "trivial values must not match, or the scanner becomes noise: {:?}",
+        report.findings
+    );
+}
+
+#[test]
+fn an_unignored_dotenv_is_a_warning_and_the_fix_silences_it() {
+    let vault_dir = temp_dir();
+    let vault = Vault::create_in(vault_dir.path(), "pw").unwrap();
+    let repo = git_repo_with(&[("README.md", "hello\n")]);
+    // present on disk, never committed, and .gitignore does not cover it
+    std::fs::write(repo.path().join(".env"), "API_KEY=sk_live_9f2b1ce7a4d8\n").unwrap();
+
+    let report = vault.scan_directory(repo.path()).unwrap();
+    let warning = report
+        .findings
+        .iter()
+        .find(|f| f.kind == "unignoredEnvFile")
+        .expect("an unprotected .env should be a warning");
+    assert_eq!(warning.severity, "warning");
+    // nothing is committed yet, so nothing needs rotating
+    assert!(!warning.needs_rotation);
+
+    let added = vault_core::gitguard::apply_gitignore_patterns(
+        repo.path(),
+        &report.suggested_patterns(),
+    )
+    .unwrap();
+    assert_eq!(added, 1);
+
+    let after = vault.scan_directory(repo.path()).unwrap();
+    assert!(
+        after.findings.is_empty(),
+        "the fix should clear the finding: {:?}",
+        after.findings
+    );
+}
+
+#[test]
+fn a_directory_that_is_not_a_git_repository_reports_rather_than_errors() {
+    let vault_dir = temp_dir();
+    let vault = Vault::create_in(vault_dir.path(), "pw").unwrap();
+    let plain = temp_dir();
+
+    let report = vault.scan_directory(plain.path()).unwrap();
+    assert!(report.git_root.is_none());
+    assert!(report.note.is_some());
+    assert!(report.findings.is_empty());
+    assert!(!report.has_findings());
+}
+
+#[test]
+fn scanning_linked_projects_covers_every_linked_folder() {
+    let vault_dir = temp_dir();
+    let vault = Vault::create_in(vault_dir.path(), "pw").unwrap();
+    let repo_row = vault.create_repo("api-gateway").unwrap();
+    let env = vault.create_environment(&repo_row.id, "local").unwrap();
+
+    let clean = git_repo_with(&[("README.md", "nothing here\n")]);
+    let leaky = git_repo_with(&[(".env", "API_KEY=sk_live_9f2b1ce7a4d8\n")]);
+    vault.link_project(clean.path(), &env.id).unwrap();
+    vault.link_project(leaky.path(), &env.id).unwrap();
+
+    let reports = vault.scan_linked_projects().unwrap();
+    assert_eq!(reports.len(), 2);
+    assert_eq!(reports.iter().filter(|r| r.has_findings()).count(), 1);
 }

@@ -31,6 +31,12 @@ pub struct Variable {
     pub description: Option<String>,
     /// Whether `vault check` should fail when this variable is empty.
     pub required: bool,
+    /// How long this value may go untouched before the health panel calls it
+    /// due for rotation. `None` -- the default -- means no policy: the panel
+    /// still reports a generic staleness warning, but only an explicit policy
+    /// produces a "rotation due" issue. Per-environment, like the other
+    /// metadata: a link group syncs values, not policies.
+    pub rotate_after_days: Option<i64>,
 }
 
 /// A [`Variable`] enriched with how many total variables share its link group,

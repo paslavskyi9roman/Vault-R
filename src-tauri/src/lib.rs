@@ -70,6 +70,10 @@ pub fn run() {
             commands::set_meta,
             commands::copy_secret_to_clipboard,
             commands::generate_secret,
+            commands::scan_linked_projects,
+            commands::scan_directory,
+            commands::apply_gitignore_patterns,
+            commands::health_report,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

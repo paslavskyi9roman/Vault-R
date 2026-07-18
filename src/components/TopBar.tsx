@@ -10,6 +10,7 @@ export function TopBar() {
   const replayOnboarding = useVaultStore((s) => s.replayOnboarding);
   const lockVault = useVaultStore((s) => s.lockVault);
   const openSettings = useVaultStore((s) => s.openSettings);
+  const openSafety = useVaultStore((s) => s.openSafety);
   const needsMigration = useVaultStore((s) => s.needsMigration);
 
   return (
@@ -33,6 +34,13 @@ export function TopBar() {
         <span style={cmdkShortcutStyle}>{isMac ? '⌘K' : 'Ctrl+K'}</span>
       </div>
       <div style={topBarActionsStyle}>
+        <button
+          style={topBarBtnStyle}
+          onClick={() => void openSafety()}
+          title="Check whether any of these secrets are committed, and what needs rotating"
+        >
+          Safety
+        </button>
         <button style={topBarBtnStyle} onClick={openImport}>
           Import
         </button>

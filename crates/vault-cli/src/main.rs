@@ -1,4 +1,5 @@
 mod auth;
+mod report;
 mod target;
 
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
@@ -166,6 +167,28 @@ enum Command {
         /// Character count (or word count with --words)
         #[arg(long)]
         length: Option<usize>,
+    },
+    /// Check a project directory for secrets that git can see; exits non-zero
+    /// if anything is found, so it works as a pre-commit hook or a CI gate
+    Scan {
+        /// Directory to scan (default: the current one). Pass --linked to scan
+        /// every folder registered with `vault link` instead.
+        path: Option<PathBuf>,
+        /// Scan every linked project directory
+        #[arg(long, conflicts_with = "path")]
+        linked: bool,
+        /// Add the suggested patterns to .gitignore
+        #[arg(long)]
+        fix: bool,
+    },
+    /// Report placeholder, empty, stale and duplicated secrets
+    Health {
+        /// <repo>/<env>; omit to resolve from the current directory's linked
+        /// project, or pass --all for the whole vault
+        target: Option<String>,
+        /// Report on every environment in the vault
+        #[arg(long, conflicts_with = "target")]
+        all: bool,
     },
     /// Print a shell completion script to stdout
     Completions {
@@ -590,11 +613,80 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             let secret = vault_core::crypto::generate_secret(kind, length.unwrap_or(default_len))?;
             println!("{secret}");
         }
+        Command::Scan { path, linked, fix } => {
+            let vault = auth::unlock()?;
+            let reports = if linked {
+                let reports = vault.scan_linked_projects()?;
+                if reports.is_empty() {
+                    println!("(no linked projects yet — run `vault link <repo>/<env>` in one)");
+                }
+                reports
+            } else {
+                let dir = match path {
+                    Some(p) => p,
+                    None => std::env::current_dir()?,
+                };
+                vec![vault.scan_directory(&dir)?]
+            };
+
+            let mut any_findings = false;
+            let mut needs_rotation = false;
+            for report in &reports {
+                print!("{}", report::leak_report_text(report));
+                any_findings |= report.has_findings();
+                needs_rotation |= report.findings.iter().any(|f| f.needs_rotation);
+                if fix {
+                    apply_fix(report)?;
+                }
+            }
+
+            // Without --fix, any finding is a failure. With it, the .gitignore
+            // write has handled everything *except* what is already committed,
+            // and that genuinely still needs a human: rotate the credential.
+            if if fix { needs_rotation } else { any_findings } {
+                std::process::exit(1);
+            }
+        }
+        Command::Health { target, all } => {
+            let vault = auth::unlock()?;
+            let (label, report) = if all {
+                ("this vault".to_string(), vault.health_report()?)
+            } else {
+                let (repo, env) = target::resolve_target_or_cwd(&vault, target.as_deref(), false)?;
+                let label = format!("{}/{}", repo.name, env.name);
+                let report = vault.health_report_for_env(&env.id)?;
+                (label, report)
+            };
+            print!("{}", report::health_report_text(&label, &report));
+        }
         Command::Completions { shell } => {
             let mut cmd = Cli::command();
             let name = cmd.get_name().to_string();
             clap_complete::generate(shell, &mut cmd, name, &mut std::io::stdout());
         }
+    }
+    Ok(())
+}
+
+/// Applies a report's suggested `.gitignore` patterns, and says plainly what
+/// that did *not* do — a scan that leaves the user believing a committed
+/// secret is now safe would be worse than not offering the fix at all.
+fn apply_fix(report: &vault_core::gitguard::LeakReport) -> Result<(), Box<dyn std::error::Error>> {
+    let Some(root) = &report.git_root else {
+        return Ok(());
+    };
+    let patterns = report.suggested_patterns();
+    if patterns.is_empty() {
+        return Ok(());
+    }
+    let added =
+        vault_core::gitguard::apply_gitignore_patterns(std::path::Path::new(root), &patterns)?;
+    println!("  Added {added} pattern(s) to {root}/.gitignore.");
+    if report.findings.iter().any(|f| f.needs_rotation) {
+        println!(
+            "  This stops future commits only. Anything already tracked is still in the \
+             repository's history — untrack it and rotate those credentials."
+        );
     }
     Ok(())
 }
@@ -669,6 +761,36 @@ mod arg_parsing_tests {
             cli.command,
             Command::Import { args, create: false } if args == strs(&["repo/env", "file.env"])
         ));
+    }
+
+    #[test]
+    fn cli_parses_scan_with_a_path_or_linked_but_not_both() {
+        let cli = Cli::try_parse_from(["vault", "scan"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Scan { path: None, linked: false, fix: false }
+        ));
+
+        let cli = Cli::try_parse_from(["vault", "scan", "--linked", "--fix"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Scan { path: None, linked: true, fix: true }
+        ));
+
+        // a directory to scan and "scan every linked directory" are different
+        // questions; accepting both would have to silently ignore one
+        assert!(Cli::try_parse_from(["vault", "scan", ".", "--linked"]).is_err());
+    }
+
+    #[test]
+    fn cli_parses_health_with_a_target_or_all_but_not_both() {
+        let cli = Cli::try_parse_from(["vault", "health"]).unwrap();
+        assert!(matches!(cli.command, Command::Health { target: None, all: false }));
+
+        let cli = Cli::try_parse_from(["vault", "health", "repo/env"]).unwrap();
+        assert!(matches!(cli.command, Command::Health { target: Some(t), .. } if t == "repo/env"));
+
+        assert!(Cli::try_parse_from(["vault", "health", "repo/env", "--all"]).is_err());
     }
 
     #[test]

@@ -148,7 +148,7 @@ fn configure_connection(conn: &Connection) -> Result<()> {
 /// `PRAGMA user_version` rather than a bootstrap table -- it lives inside the
 /// database image itself, so it travels with the encrypted blob and with
 /// every backup for free.
-const SCHEMA_VERSION: i32 = 3;
+const SCHEMA_VERSION: i32 = 4;
 
 /// One ordered step in the schema's history. `noop` marks a step guaranteed
 /// not to alter existing data (e.g. `CREATE TABLE IF NOT EXISTS` against
@@ -236,6 +236,15 @@ const MIGRATIONS: &[Migration] = &[Migration {
     sql: r#"
         ALTER TABLE variables ADD COLUMN description TEXT;
         ALTER TABLE variables ADD COLUMN required INTEGER NOT NULL DEFAULT 0;
+        "#,
+}, Migration {
+    // NULL means "no rotation policy", which is every pre-existing row, so
+    // this changes no data -- but it is still a structural change and takes a
+    // pre-migration backup like any other.
+    version: 4,
+    noop: false,
+    sql: r#"
+        ALTER TABLE variables ADD COLUMN rotate_after_days INTEGER;
         "#,
 }];
 
@@ -710,7 +719,8 @@ mod migration_tests {
                 "PRAGMA user_version = 0;
                  DROP TABLE projects;
                  ALTER TABLE variables DROP COLUMN description;
-                 ALTER TABLE variables DROP COLUMN required;",
+                 ALTER TABLE variables DROP COLUMN required;
+                 ALTER TABLE variables DROP COLUMN rotate_after_days;",
             )
             .unwrap();
         vault.persist().unwrap();
@@ -740,7 +750,8 @@ mod migration_tests {
                 "PRAGMA user_version = 1;
                  DROP TABLE projects;
                  ALTER TABLE variables DROP COLUMN description;
-                 ALTER TABLE variables DROP COLUMN required;",
+                 ALTER TABLE variables DROP COLUMN required;
+                 ALTER TABLE variables DROP COLUMN rotate_after_days;",
             )
             .unwrap();
         vault.persist().unwrap();

@@ -2,6 +2,8 @@ use crate::state::{self, AppState};
 use tauri::State;
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use vault_core::backup::BackupInfo;
+use vault_core::gitguard::LeakReport;
+use vault_core::health::HealthReport;
 use vault_core::models::{
     DiffRow, Environment, GroupMember, Member, ProjectInfo, Repo, RepoSummary, SearchResult,
     Snapshot, SnapshotWithStats, UnlinkedMatch, Variable, VariableWithUsage,
@@ -320,10 +322,11 @@ pub fn set_variable_metadata(
     var_id: String,
     description: Option<String>,
     required: bool,
+    rotate_after_days: Option<i64>,
     state: State<AppState>,
 ) -> Result<(), String> {
     state::with_vault(&state, |v| {
-        v.set_variable_metadata(&var_id, description.as_deref(), required)
+        v.set_variable_metadata(&var_id, description.as_deref(), required, rotate_after_days)
     })
 }
 
@@ -518,6 +521,37 @@ pub fn unlink_project(path: String, state: State<AppState>) -> Result<(), String
 #[tauri::command]
 pub fn list_projects(state: State<AppState>) -> Result<Vec<ProjectInfo>, String> {
     state::with_vault(&state, |v| v.list_projects())
+}
+
+// ---------------------------------------------------------------------
+// Safety: git leak guard and secret health
+// ---------------------------------------------------------------------
+
+/// Scans every directory registered with `vault link`. Reports carry key
+/// names and file locations but never secret values, so the panel that
+/// renders them is safe to open in front of an audience.
+#[tauri::command]
+pub fn scan_linked_projects(state: State<AppState>) -> Result<Vec<LeakReport>, String> {
+    state::with_vault(&state, |v| v.scan_linked_projects())
+}
+
+#[tauri::command]
+pub fn scan_directory(path: String, state: State<AppState>) -> Result<LeakReport, String> {
+    state::with_vault(&state, |v| v.scan_directory(std::path::Path::new(&path)))
+}
+
+/// Appends the given `.gitignore` patterns at `git_root`. This stops future
+/// commits; it does not untrack anything already committed, which is why the
+/// findings that need rotation say so themselves.
+#[tauri::command]
+pub fn apply_gitignore_patterns(git_root: String, patterns: Vec<String>) -> Result<usize, String> {
+    vault_core::gitguard::apply_gitignore_patterns(std::path::Path::new(&git_root), &patterns)
+        .map_err(stringify)
+}
+
+#[tauri::command]
+pub fn health_report(state: State<AppState>) -> Result<HealthReport, String> {
+    state::with_vault(&state, |v| v.health_report())
 }
 
 // ---------------------------------------------------------------------

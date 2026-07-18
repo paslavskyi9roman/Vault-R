@@ -4,8 +4,11 @@ import {
   api,
   type BackupInfo,
   type DiffRow,
+  type DuplicateValueGroup,
   type GeneratorKind,
   type GroupMember,
+  type HealthReport,
+  type LeakReport,
   type Member,
   type ProjectInfo,
   type RepoSummary,
@@ -22,6 +25,10 @@ const AUTO_LOCK_META_KEY = 'auto_lock_minutes';
 /// Where a generated secret goes when the user clicks "Generate": the
 /// still-unsaved add-row, or an existing variable (which commits immediately).
 export type GeneratorTarget = { type: 'add' } | { type: 'row'; varId: string };
+
+/// The two halves of the safety panel: what git can see, and what is wrong
+/// inside the vault.
+export type SafetyTab = 'leaks' | 'health';
 
 const GENERATOR_DEFAULT_LENGTH: Record<GeneratorKind, number> = {
   hex: 32,
@@ -160,6 +167,17 @@ interface VaultState {
   compareUnlinkedMatches: UnlinkedMatch[];
   compareBusy: boolean;
 
+  // ---- safety panel: git leak guard + secret health ----
+  safetyOpen: boolean;
+  safetyTab: SafetyTab;
+  leakReports: LeakReport[];
+  leakScanning: boolean;
+  /// Set once a scan has completed, so an empty result can be rendered as
+  /// "clean" rather than as "not scanned yet".
+  leakScanned: boolean;
+  health: HealthReport | null;
+  healthLoading: boolean;
+
   // ---- onboarding ----
   onboarding: boolean;
   onboardingStep: number;
@@ -218,7 +236,12 @@ interface VaultState {
   commitVariableKey: (varId: string, newKey: string) => Promise<void>;
   deleteVariable: (varId: string, key: string) => Promise<void>;
   toggleVarExpand: (varId: string) => void;
-  commitVariableMetadata: (varId: string, description: string, required: boolean) => Promise<void>;
+  commitVariableMetadata: (
+    varId: string,
+    description: string,
+    required: boolean,
+    rotateAfterDays: number | null,
+  ) => Promise<void>;
   toggleReveal: (varId: string) => void;
 
   toggleVarSelected: (varId: string) => void;
@@ -293,6 +316,15 @@ interface VaultState {
   copyCompareRow: (key: string, direction: 'aToB' | 'bToA') => Promise<void>;
   copyAllMissing: (direction: 'aToB' | 'bToA') => Promise<void>;
   linkCompareMatch: (match: UnlinkedMatch) => Promise<void>;
+
+  openSafety: (tab?: SafetyTab) => Promise<void>;
+  closeSafety: () => void;
+  setSafetyTab: (tab: SafetyTab) => Promise<void>;
+  runLeakScan: () => Promise<void>;
+  refreshHealth: () => Promise<void>;
+  applyGitignoreFix: (report: LeakReport) => Promise<void>;
+  linkDuplicateGroup: (group: DuplicateValueGroup) => Promise<void>;
+  jumpToVariable: (envId: string, varId: string) => Promise<void>;
 
   obNext: () => void;
   obSkip: () => Promise<void>;
@@ -401,6 +433,14 @@ export const useVaultStore = create<VaultState>((set, get) => ({
   compareRevealed: {},
   compareUnlinkedMatches: [],
   compareBusy: false,
+
+  safetyOpen: false,
+  safetyTab: 'leaks',
+  leakReports: [],
+  leakScanning: false,
+  leakScanned: false,
+  health: null,
+  healthLoading: false,
 
   onboarding: false,
   onboardingStep: 0,
@@ -754,9 +794,14 @@ export const useVaultStore = create<VaultState>((set, get) => ({
 
   toggleVarExpand: (varId) =>
     set((s) => ({ expandedVarId: s.expandedVarId === varId ? null : varId })),
-  commitVariableMetadata: async (varId, description, required) => {
+  commitVariableMetadata: async (varId, description, required, rotateAfterDays) => {
     try {
-      await api.setVariableMetadata(varId, description.trim() ? description : null, required);
+      await api.setVariableMetadata(
+        varId,
+        description.trim() ? description : null,
+        required,
+        rotateAfterDays,
+      );
       await get().refreshVariables();
     } catch (e) {
       get().showToast(String(e));
@@ -1412,6 +1457,78 @@ export const useVaultStore = create<VaultState>((set, get) => ({
     }
   },
 
+  /// Opens the panel with its scan already running. A safety panel that waits
+  /// for a click before telling you anything gets opened once.
+  openSafety: async (tab = 'leaks') => {
+    set({ safetyOpen: true, safetyTab: tab });
+    await (tab === 'leaks' ? get().runLeakScan() : get().refreshHealth());
+  },
+  closeSafety: () => set({ safetyOpen: false }),
+  setSafetyTab: async (tab) => {
+    set({ safetyTab: tab });
+    if (tab === 'leaks' && !get().leakScanned) {
+      await get().runLeakScan();
+    } else if (tab === 'health' && !get().health) {
+      await get().refreshHealth();
+    }
+  },
+  runLeakScan: async () => {
+    set({ leakScanning: true });
+    try {
+      set({ leakReports: await api.scanLinkedProjects(), leakScanned: true });
+    } catch (e) {
+      get().showToast(String(e));
+    } finally {
+      set({ leakScanning: false });
+    }
+  },
+  refreshHealth: async () => {
+    set({ healthLoading: true });
+    try {
+      set({ health: await api.healthReport() });
+    } catch (e) {
+      get().showToast(String(e));
+    } finally {
+      set({ healthLoading: false });
+    }
+  },
+  applyGitignoreFix: async (report) => {
+    if (!report.gitRoot) return;
+    const patterns = Array.from(
+      new Set(report.findings.map((f) => f.fixPattern).filter((p): p is string => !!p)),
+    );
+    if (patterns.length === 0) return;
+    try {
+      const added = await api.applyGitignorePatterns(report.gitRoot, patterns);
+      await get().runLeakScan();
+      get().showToast(
+        added === 0
+          ? '.gitignore already covered those'
+          : `Added ${added} pattern${added === 1 ? '' : 's'} to .gitignore`,
+      );
+    } catch (e) {
+      get().showToast(String(e));
+    }
+  },
+  linkDuplicateGroup: async (group) => {
+    try {
+      await api.linkVariables(group.locations.map((l) => l.varId));
+      await Promise.all([get().refreshHealth(), get().refreshRepos(), get().refreshVariables()]);
+      get().showToast(`Linked ${group.locations.length} variables`);
+    } catch (e) {
+      get().showToast(String(e));
+    }
+  },
+  /// Selects the environment a safety row points at and expands the row, so
+  /// "3 problems" turns into "here is the first one" in one click.
+  jumpToVariable: async (envId, varId) => {
+    const repo = get().repos.find((r) => r.envs.some((e) => e.id === envId));
+    if (!repo) return;
+    set({ safetyOpen: false });
+    await get().selectEnv(repo.id, envId);
+    set({ expandedVarId: varId, expandedRepos: { ...get().expandedRepos, [repo.id]: true } });
+  },
+
   obNext: () => set((s) => ({ onboardingStep: s.onboardingStep + 1 })),
   obSkip: async () => {
     await get().obFinish();
@@ -1459,6 +1576,7 @@ export const useVaultStore = create<VaultState>((set, get) => ({
       generatorOpen: false,
       generatorTarget: null,
       compareOpen: false,
+      safetyOpen: false,
       settingsOpen: false,
       // never yank a confirmation out from under an action that is mid-flight
       confirm: s.confirmBusy ? s.confirm : null,
