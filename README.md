@@ -161,6 +161,3 @@ npx tsc --noEmit
 
 The leak-guard tests build real git repositories in temp directories, so `git` must be on your PATH to
 run the full suite.
-
-See [.vscode/PLAN.md](.vscode/PLAN.md) for the original design/implementation plan and
-[.vscode/PHASE2.md](.vscode/PHASE2.md) for the plan that added the commands above.
