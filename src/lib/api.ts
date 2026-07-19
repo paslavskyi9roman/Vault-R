@@ -192,6 +192,7 @@ export const api = {
     invoke<void>('vault_unlock', { password, remember }),
   vaultUnlockWithRecovery: (code: string) => invoke<void>('vault_unlock_with_recovery', { code }),
   vaultLock: () => invoke<void>('vault_lock'),
+  notifyActivity: () => invoke<void>('notify_activity'),
   vaultNeedsMigration: () => invoke<boolean>('vault_needs_migration'),
   vaultChangePassword: (currentPassword: string, newPassword: string, remember: boolean) =>
     invoke<void>('vault_change_password', { currentPassword, newPassword, remember }),
@@ -199,8 +200,7 @@ export const api = {
   vaultHasRecoveryCode: () => invoke<boolean>('vault_has_recovery_code'),
   vaultGenerateRecoveryCode: () => invoke<string>('vault_generate_recovery_code'),
 
-  saveRecoveryKit: (path: string, code: string) =>
-    invoke<void>('save_recovery_kit', { path, code }),
+  saveRecoveryKit: (path: string) => invoke<void>('save_recovery_kit', { path }),
   listBackups: () => invoke<BackupInfo[]>('list_backups'),
   exportBackup: (path: string) => invoke<void>('export_backup', { path }),
   restoreBackup: (path: string) => invoke<void>('restore_backup', { path }),

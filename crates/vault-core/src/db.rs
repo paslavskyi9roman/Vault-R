@@ -1,5 +1,6 @@
 use crate::crypto::{
-    decrypt, derive_key, encrypt, DerivedKey, KeySlot, VaultHeader, VaultMetaFile,
+    decrypt, decrypt_with_aad, derive_key, encrypt, encrypt_with_aad, DerivedKey, KeySlot,
+    VaultHeader, VaultMetaFile,
 };
 use crate::error::{Result, VaultError};
 use crate::paths;
@@ -9,12 +10,19 @@ use std::fs;
 use std::os::raw::c_int;
 use std::path::{Path, PathBuf};
 use std::ptr::NonNull;
-use zeroize::Zeroize;
+use zeroize::{Zeroize, Zeroizing};
 
-/// Leading bytes of a v2 vault file. Eight bytes so that a v1 blob — which
-/// begins with a random nonce — cannot plausibly be mistaken for one.
+/// Leading bytes of a self-describing (v2/v3) vault file. Eight bytes so that a
+/// v1 blob — which begins with a random nonce — cannot plausibly be mistaken
+/// for one. The marker is shared across the v2 and v3 layouts (the header's
+/// `version` field distinguishes them), so files written by either build are
+/// recognized and existing v2 vaults keep opening.
 const MAGIC: &[u8; 8] = b"VAULT-R2";
-const FORMAT_VERSION: u32 = 2;
+/// Current header format. **v3** authenticates the header as AES-GCM associated
+/// data on the database payload, so tampering with the Argon2 params, salt or
+/// key slots is caught on open. **v2** (still readable) used no associated data;
+/// a v2 file is rewritten as v3 on the first `persist`.
+const FORMAT_VERSION: u32 = 3;
 
 /// How the vault on disk is laid out.
 ///
@@ -35,8 +43,31 @@ enum Format {
 
 /// A vault file split into "how to get the data key" and "the encrypted image".
 enum VaultFile {
-    V1 { blob: Vec<u8> },
-    V2 { header: VaultHeader, payload: Vec<u8> },
+    V1 {
+        blob: Vec<u8>,
+    },
+    V2 {
+        header: VaultHeader,
+        /// The exact on-disk header bytes, authenticated as AES-GCM associated
+        /// data for a v3 payload (see [`decrypt_payload`]).
+        header_bytes: Vec<u8>,
+        payload: Vec<u8>,
+    },
+}
+
+/// Decrypts a self-describing vault's database payload. A v3 header binds
+/// itself to the ciphertext as associated data; a legacy v2 header used none.
+fn decrypt_payload(
+    key: &DerivedKey,
+    header: &VaultHeader,
+    header_bytes: &[u8],
+    payload: &[u8],
+) -> Result<Vec<u8>> {
+    if header.version >= 3 {
+        decrypt_with_aad(key, payload, header_bytes)
+    } else {
+        decrypt(key, payload)
+    }
 }
 
 /// Parses a vault file already in memory, so callers that need the
@@ -66,20 +97,21 @@ fn parse_vault_bytes(bytes: &[u8]) -> Result<VaultFile> {
     let header: VaultHeader = serde_json::from_slice(&bytes[body_at..payload_at])?;
     Ok(VaultFile::V2 {
         header,
+        header_bytes: bytes[body_at..payload_at].to_vec(),
         payload: bytes[payload_at..].to_vec(),
     })
 }
 
-/// Serializes a v2 vault file: magic, header length, header JSON, then the
-/// encrypted database image.
-fn encode_v2(header: &VaultHeader, payload: &[u8]) -> Result<Vec<u8>> {
-    let header_json = serde_json::to_vec(header)?;
+/// Frames a self-describing vault file: magic, header length, header JSON, then
+/// the encrypted database image. Takes the header pre-serialized so the exact
+/// same bytes can double as the payload's associated data.
+fn encode_framed(header_json: &[u8], payload: &[u8]) -> Result<Vec<u8>> {
     let header_len = u32::try_from(header_json.len())
         .map_err(|_| VaultError::Crypto("vault header too large".into()))?;
     let mut out = Vec::with_capacity(MAGIC.len() + 4 + header_json.len() + payload.len());
     out.extend_from_slice(MAGIC);
     out.extend_from_slice(&header_len.to_le_bytes());
-    out.extend_from_slice(&header_json);
+    out.extend_from_slice(header_json);
     out.extend_from_slice(payload);
     Ok(out)
 }
@@ -444,9 +476,9 @@ impl Vault {
 
         let full_bytes = fs::read(&blob_path)?;
         match parse_vault_bytes(&full_bytes)? {
-            VaultFile::V2 { header, payload } => {
+            VaultFile::V2 { header, header_bytes, payload } => {
                 let key = header.password.open(password)?;
-                let mut plaintext = decrypt(&key, &payload)?;
+                let mut plaintext = decrypt_payload(&key, &header, &header_bytes, &payload)?;
                 let vault = Self::from_plaintext(
                     key,
                     Format::V2 { header },
@@ -502,12 +534,17 @@ impl Vault {
         remove_legacy_session_file(dir);
 
         let full_bytes = fs::read(&blob_path)?;
-        let (format, payload) = match parse_vault_bytes(&full_bytes)? {
-            VaultFile::V2 { header, payload } => (Format::V2 { header }, payload),
-            VaultFile::V1 { blob } => (Format::V1, blob),
+        let (format, header_bytes, payload) = match parse_vault_bytes(&full_bytes)? {
+            VaultFile::V2 { header, header_bytes, payload } => {
+                (Format::V2 { header }, Some(header_bytes), payload)
+            }
+            VaultFile::V1 { blob } => (Format::V1, None, blob),
         };
         let is_v2 = matches!(format, Format::V2 { .. });
-        let mut plaintext = decrypt(&key, &payload)?;
+        let mut plaintext = match (&format, &header_bytes) {
+            (Format::V2 { header }, Some(hb)) => decrypt_payload(&key, header, hb, &payload)?,
+            _ => decrypt(&key, &payload)?,
+        };
         let vault = Self::from_plaintext(
             key,
             format,
@@ -559,8 +596,8 @@ impl Vault {
     /// keychain for "remember on this device". Because this is the data key
     /// and not a password-derived key, a remembered entry survives a master
     /// password change.
-    pub fn key_hex(&self) -> String {
-        self.key.to_hex()
+    pub fn key_hex(&self) -> Zeroizing<String> {
+        Zeroizing::new(self.key.to_hex())
     }
 
     /// True for a vault still stored in the legacy v1 format, which cannot
@@ -585,13 +622,23 @@ impl Vault {
     /// replaces the on-disk vault file. Called after every mutating operation.
     pub(crate) fn persist(&self) -> Result<()> {
         let image = self.conn.serialize(DatabaseName::Main)?;
-        let ciphertext = encrypt(&self.key, &image)?;
         let bytes = match &self.format {
-            Format::V1 => ciphertext,
-            Format::V2 { header } => encode_v2(header, &ciphertext)?,
+            Format::V1 => encrypt(&self.key, &image)?,
+            Format::V2 { header } => {
+                // Always persist in the current v3 layout: the header bytes
+                // authenticate the payload as associated data, so an in-memory
+                // v2 header (from opening an older file) is upgraded here.
+                let mut header = header.clone();
+                header.version = FORMAT_VERSION;
+                let header_json = serde_json::to_vec(&header)?;
+                let ciphertext = encrypt_with_aad(&self.key, &image, &header_json)?;
+                encode_framed(&header_json, &ciphertext)?
+            }
         };
         let tmp_path = self.blob_path.with_extension("enc.tmp");
         fs::write(&tmp_path, &bytes)?;
+        // Tighten before the rename so there is never a world-readable window.
+        paths::restrict_file(&tmp_path);
         fs::rename(&tmp_path, &self.blob_path)?;
         Ok(())
     }
@@ -664,7 +711,7 @@ impl Vault {
         remove_legacy_session_file(dir);
 
         let full_bytes = fs::read(&blob_path)?;
-        let VaultFile::V2 { header, payload } = parse_vault_bytes(&full_bytes)? else {
+        let VaultFile::V2 { header, header_bytes, payload } = parse_vault_bytes(&full_bytes)? else {
             return Err(VaultError::InvalidInput(
                 "this vault has no recovery kit".into(),
             ));
@@ -674,7 +721,7 @@ impl Vault {
             .as_ref()
             .ok_or_else(|| VaultError::InvalidInput("this vault has no recovery kit".into()))?;
         let key = slot.open(&crate::crypto::normalize_recovery_code(code))?;
-        let mut plaintext = decrypt(&key, &payload)?;
+        let mut plaintext = decrypt_payload(&key, &header, &header_bytes, &payload)?;
         let vault = Self::from_plaintext(
             key,
             Format::V2 { header },
@@ -883,5 +930,101 @@ mod migration_tests {
         assert!(Vault::open_in(dir.path(), "pw").is_err());
         let bytes_after = std::fs::read(dir.path().join("vault.db.enc")).unwrap();
         assert_eq!(bytes_before, bytes_after);
+    }
+}
+
+#[cfg(test)]
+mod format_tests {
+    use super::*;
+
+    /// The `version` recorded in the on-disk header (1 for legacy, 2 for the
+    /// no-AAD layout, 3 for the header-authenticated layout).
+    fn file_version(dir: &Path) -> u32 {
+        let bytes = fs::read(blob_file_path(dir)).unwrap();
+        match parse_vault_bytes(&bytes).unwrap() {
+            VaultFile::V2 { header, .. } => header.version,
+            VaultFile::V1 { .. } => 1,
+        }
+    }
+
+    /// Rewrites the on-disk vault in the pre-AAD v2 layout, so the
+    /// upgrade-on-write path can be exercised even though `create_in` now
+    /// produces v3.
+    fn rewrite_as_v2(dir: &Path, password: &str) {
+        let path = blob_file_path(dir);
+        let bytes = fs::read(&path).unwrap();
+        let VaultFile::V2 { header, header_bytes, payload } = parse_vault_bytes(&bytes).unwrap()
+        else {
+            panic!("expected a self-describing vault file");
+        };
+        let key = header.password.open(password).unwrap();
+        let image = decrypt_payload(&key, &header, &header_bytes, &payload).unwrap();
+        let mut v2_header = header.clone();
+        v2_header.version = 2;
+        let header_json = serde_json::to_vec(&v2_header).unwrap();
+        let v2_payload = encrypt(&key, &image).unwrap(); // empty AAD
+        fs::write(&path, encode_framed(&header_json, &v2_payload).unwrap()).unwrap();
+    }
+
+    #[test]
+    fn a_fresh_vault_is_written_in_v3() {
+        let dir = tempfile::tempdir().unwrap();
+        Vault::create_in(dir.path(), "pw").unwrap();
+        assert_eq!(file_version(dir.path()), 3);
+    }
+
+    #[test]
+    fn a_legacy_v2_file_still_opens_and_upgrades_to_v3_on_write() {
+        let dir = tempfile::tempdir().unwrap();
+        {
+            let v = Vault::create_in(dir.path(), "pw").unwrap();
+            let r = v.create_repo("api").unwrap();
+            let e = v.create_environment(&r.id, "local").unwrap();
+            v.add_variable(&e.id, "DATABASE_URL", "postgres://x").unwrap();
+        }
+        rewrite_as_v2(dir.path(), "pw");
+        assert_eq!(file_version(dir.path()), 2);
+
+        // The v2 file opens and its data is intact.
+        let v = Vault::open_in(dir.path(), "pw").unwrap();
+        let repos = v.list_repo_summaries().unwrap();
+        assert_eq!(repos[0].name, "api");
+        let vars = v.list_variables(&repos[0].envs[0].id).unwrap();
+        assert_eq!(vars[0].value, "postgres://x");
+
+        // The next write upgrades it in place to v3, and it still opens.
+        v.create_repo("second").unwrap();
+        drop(v);
+        assert_eq!(file_version(dir.path()), 3);
+        let reopened = Vault::open_in(dir.path(), "pw").unwrap();
+        assert_eq!(reopened.list_repos().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn tampering_the_v3_header_is_caught_by_the_payload_tag() {
+        let dir = tempfile::tempdir().unwrap();
+        {
+            let v = Vault::create_in(dir.path(), "pw").unwrap();
+            v.create_repo("r").unwrap();
+        }
+        assert_eq!(file_version(dir.path()), 3);
+
+        // Flip the recorded version 3 -> 2 to try to force the empty-AAD read
+        // path. The attacker cannot recompute the payload's GCM tag, which was
+        // bound to the real (v3) header, so the open fails authentication.
+        let path = blob_file_path(dir.path());
+        let bytes = fs::read(&path).unwrap();
+        let VaultFile::V2 { header, payload, .. } = parse_vault_bytes(&bytes).unwrap() else {
+            panic!("expected a self-describing vault file");
+        };
+        let mut forged = header.clone();
+        forged.version = 2;
+        let header_json = serde_json::to_vec(&forged).unwrap();
+        fs::write(&path, encode_framed(&header_json, &payload).unwrap()).unwrap();
+
+        assert!(matches!(
+            Vault::open_in(dir.path(), "pw").unwrap_err(),
+            VaultError::WrongPassword
+        ));
     }
 }

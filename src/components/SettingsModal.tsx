@@ -200,6 +200,8 @@ function PasswordSection() {
         value={pwCurrent}
         onChange={(e) => setPwField('pwCurrent', e.target.value)}
         disabled={needsMigration}
+        autoComplete="current-password"
+        spellCheck={false}
       />
       <input
         className={`v-input ${styles.pwInput}`}
@@ -208,6 +210,8 @@ function PasswordSection() {
         value={pwNew}
         onChange={(e) => setPwField('pwNew', e.target.value)}
         disabled={needsMigration}
+        autoComplete="new-password"
+        spellCheck={false}
       />
       <input
         className={`v-input ${styles.pwInput}`}
@@ -216,6 +220,8 @@ function PasswordSection() {
         value={pwConfirm}
         onChange={(e) => setPwField('pwConfirm', e.target.value)}
         disabled={needsMigration}
+        autoComplete="new-password"
+        spellCheck={false}
       />
       <label className={styles.checkboxRow}>
         <input

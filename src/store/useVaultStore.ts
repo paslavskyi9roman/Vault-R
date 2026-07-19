@@ -200,6 +200,9 @@ interface VaultState {
   createVault: (password: string, remember: boolean) => Promise<void>;
   unlockVault: (password: string, remember: boolean) => Promise<void>;
   lockVault: () => Promise<void>;
+  /// Applies the locked UI state when the backend auto-lock enforcer has
+  /// already locked the vault (so it must not call `vault_lock` again).
+  onBackendLock: () => void;
 
   refreshRepos: () => Promise<void>;
   refreshVariables: () => Promise<void>;
@@ -525,25 +528,10 @@ export const useVaultStore = create<VaultState>((set, get) => ({
 
   lockVault: async () => {
     await api.vaultLock();
-    set({
-      locked: true,
-      repos: [],
-      variables: [],
-      projects: [],
-      activeRepoId: null,
-      activeEnvId: null,
-      revealed: {},
-      // Every session-scoped concession resets: a fresh unlock warns again.
-      protectedAcknowledged: {},
-      settingsOpen: false,
-      historyOpen: false,
-      recoveryCodeOnce: null,
-      confirm: null,
-      pwCurrent: '',
-      pwNew: '',
-      pwConfirm: '',
-    });
+    set(lockedState());
   },
+
+  onBackendLock: () => set(lockedState()),
 
   refreshRepos: async () => {
     const repos = await api.listRepoSummaries();
@@ -1210,7 +1198,7 @@ export const useVaultStore = create<VaultState>((set, get) => ({
     try {
       const path = await save({ defaultPath: 'vault-r-recovery-kit.txt' });
       if (!path) return;
-      await api.saveRecoveryKit(path, code);
+      await api.saveRecoveryKit(path);
       get().showToast('Recovery kit saved');
     } catch (e) {
       get().showToast(String(e));
@@ -1629,6 +1617,60 @@ export const useVaultStore = create<VaultState>((set, get) => ({
       confirmInput: s.confirmBusy ? s.confirmInput : '',
     })),
 }));
+
+/// The state a lock resets to. Beyond the primary `variables`, several
+/// overlays (Compare, History, link/group popovers, the importer, the command
+/// palette) cache decrypted values; if any is open at lock time its data would
+/// otherwise linger in the JS heap and re-surface on the next unlock. This
+/// clears every value-bearing slice and closes those overlays.
+function lockedState(): Partial<VaultState> {
+  return {
+    locked: true,
+    repos: [],
+    variables: [],
+    projects: [],
+    activeRepoId: null,
+    activeEnvId: null,
+    revealed: {},
+    // Every session-scoped concession resets: a fresh unlock warns again.
+    protectedAcknowledged: {},
+    recoveryCodeOnce: null,
+    confirm: null,
+    pwCurrent: '',
+    pwNew: '',
+    pwConfirm: '',
+    // Value-bearing caches from the overlays.
+    historySnapshots: [],
+    snapshotDiff: [],
+    compareRows: [],
+    compareUnlinkedMatches: [],
+    linkCandidates: [],
+    groupPopoverMembers: [],
+    newVarValue: '',
+    importText: '',
+    cmdkResults: [],
+    cmdkQuery: '',
+    // Close every overlay and drop its transient selections/reveal maps.
+    settingsOpen: false,
+    historyOpen: false,
+    expandedSnapshotId: null,
+    diffRevealed: {},
+    compareOpen: false,
+    compareEnvBId: null,
+    compareRevealed: {},
+    importOpen: false,
+    shareOpen: false,
+    linkModalOpen: false,
+    linkModalVarId: null,
+    linkModalKey: '',
+    linkSelected: {},
+    groupPopoverGroupId: null,
+    generatorOpen: false,
+    generatorTarget: null,
+    safetyOpen: false,
+    cmdkOpen: false,
+  };
+}
 
 async function afterUnlock(get: () => VaultState) {
   await get().refreshRepos();

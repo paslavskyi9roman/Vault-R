@@ -317,16 +317,19 @@ pub fn derive_key(password: &str, meta: &VaultMetaFile) -> Result<DerivedKey> {
     Ok(DerivedKey(out))
 }
 
-/// Encrypts `plaintext` with AES-256-GCM under `key`, returning
-/// `nonce (12 bytes) || ciphertext` as a single buffer suitable for writing to disk.
-pub fn encrypt(key: &DerivedKey, plaintext: &[u8]) -> Result<Vec<u8>> {
+/// Encrypts `plaintext` with AES-256-GCM under `key`, additionally
+/// authenticating (but not encrypting) `aad`. The exact same `aad` must be
+/// supplied to [`decrypt_with_aad`] or authentication fails. Returns
+/// `nonce (12 bytes) || ciphertext` as a single buffer suitable for writing to
+/// disk. Used to bind the vault header to the database ciphertext.
+pub fn encrypt_with_aad(key: &DerivedKey, plaintext: &[u8], aad: &[u8]) -> Result<Vec<u8>> {
     let cipher = Aes256Gcm::new_from_slice(&key.0)
         .map_err(|e| VaultError::Crypto(format!("bad key: {e}")))?;
     let mut nonce_bytes = [0u8; 12];
     OsRng.fill_bytes(&mut nonce_bytes);
     let nonce = Nonce::from_slice(&nonce_bytes);
     let ciphertext = cipher
-        .encrypt(nonce, plaintext)
+        .encrypt(nonce, aes_gcm::aead::Payload { msg: plaintext, aad })
         .map_err(|_| VaultError::Crypto("encryption failed".into()))?;
     let mut out = Vec::with_capacity(12 + ciphertext.len());
     out.extend_from_slice(&nonce_bytes);
@@ -334,9 +337,10 @@ pub fn encrypt(key: &DerivedKey, plaintext: &[u8]) -> Result<Vec<u8>> {
     Ok(out)
 }
 
-/// Decrypts a buffer produced by [`encrypt`]. Returns [`VaultError::WrongPassword`]
-/// on authentication failure, which is the expected signal for "bad master password".
-pub fn decrypt(key: &DerivedKey, blob: &[u8]) -> Result<Vec<u8>> {
+/// Decrypts a buffer produced by [`encrypt_with_aad`], authenticating `aad`.
+/// Returns [`VaultError::WrongPassword`] on authentication failure — a bad key
+/// *or* tampered `aad` — which is the expected signal for "bad master password".
+pub fn decrypt_with_aad(key: &DerivedKey, blob: &[u8], aad: &[u8]) -> Result<Vec<u8>> {
     if blob.len() < 12 {
         return Err(VaultError::WrongPassword);
     }
@@ -345,8 +349,19 @@ pub fn decrypt(key: &DerivedKey, blob: &[u8]) -> Result<Vec<u8>> {
         .map_err(|e| VaultError::Crypto(format!("bad key: {e}")))?;
     let nonce = Nonce::from_slice(nonce_bytes);
     cipher
-        .decrypt(nonce, ciphertext)
+        .decrypt(nonce, aes_gcm::aead::Payload { msg: ciphertext, aad })
         .map_err(|_| VaultError::WrongPassword)
+}
+
+/// Encrypts with no associated data. Used for key-slot wrapping and legacy v2
+/// database payloads (v3 payloads bind the header via [`encrypt_with_aad`]).
+pub fn encrypt(key: &DerivedKey, plaintext: &[u8]) -> Result<Vec<u8>> {
+    encrypt_with_aad(key, plaintext, &[])
+}
+
+/// Decrypts a buffer produced by [`encrypt`] (empty associated data).
+pub fn decrypt(key: &DerivedKey, blob: &[u8]) -> Result<Vec<u8>> {
+    decrypt_with_aad(key, blob, &[])
 }
 
 #[cfg(test)]
