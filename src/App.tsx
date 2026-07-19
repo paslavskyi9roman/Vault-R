@@ -22,10 +22,8 @@ import { Toast } from './components/Toast';
 import { Spinner } from './components/Spinner';
 import styles from './App.module.css';
 
-/// Reports pointer/keyboard activity to the backend, which owns the idle
-/// auto-lock timeout. Throttled so ordinary mouse movement isn't a stream of
-/// IPC calls. Enforcement lives in Rust — not here — so a frozen or
-/// compromised renderer cannot keep the vault open past the idle period.
+/// Throttled to 5s so mouse movement isn't a stream of IPC calls; the backend
+/// owns the actual timeout.
 function useActivityReporting(enabled: boolean) {
   useEffect(() => {
     if (!enabled) return;
@@ -67,10 +65,8 @@ function App() {
     return () => void unlisten.then((off) => off());
   }, [onBackendLock]);
 
-  // Lock the instant the window is hidden (minimized / app switched away) or
-  // torn down. Deliberately keyed on visibility, not focus: a native file
-  // dialog steals focus without hiding the window, and locking then would
-  // abort the very export/import the dialog was opened for.
+  // Keyed on visibility, not focus: a native file dialog steals focus
+  // without hiding the window, and locking then would abort the dialog.
   useEffect(() => {
     if (locked) return;
     const onVisibility = () => {

@@ -30,9 +30,7 @@ pub fn unlock() -> Result<Vault> {
     Vault::open(&password)
 }
 
-/// Removes any data key remembered in the OS keychain, so the next unlock has
-/// to go through the master password again. Idempotent — forgetting when there
-/// is nothing stored is not an error.
+/// Idempotent — forgetting when there is nothing stored is not an error.
 pub fn forget() -> Result<()> {
     if let Ok(entry) = keyring::Entry::new(SERVICE, ACCOUNT) {
         let _ = entry.delete_password();

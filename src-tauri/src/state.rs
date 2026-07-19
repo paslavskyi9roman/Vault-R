@@ -16,19 +16,14 @@ pub struct AppState {
     /// can take it back rather than leaving it sitting there until the 30 s
     /// timer fires.
     pub last_copied: Mutex<Option<String>>,
-    /// Wall-clock time of the last user activity, driving the backend idle
-    /// auto-lock enforcer. Wall-clock rather than `Instant` so time the machine
-    /// spends asleep or suspended still counts toward the idle period.
+    /// Wall-clock, not `Instant` — time spent asleep/suspended still counts.
     pub last_activity: Mutex<SystemTime>,
-    /// Cached idle auto-lock period in minutes (`0` disables), read from the
-    /// vault on unlock so the enforcer never has to touch the encrypted store.
+    /// Cached from the vault's meta so the enforcer never touches the store.
     pub auto_lock_minutes: Mutex<u64>,
-    /// The code from the most recent `vault_generate_recovery_code`, held only
-    /// until the kit is written to disk so the code never has to round-trip
-    /// back through the webview on save.
+    /// Held only until `save_recovery_kit` writes it, so the code never
+    /// round-trips through the webview.
     pub pending_recovery_code: Mutex<Option<Zeroizing<String>>>,
-    /// Consecutive failed unlock attempts and when the last one happened, used
-    /// to back off brute-force guessing against a running instance.
+    /// Failed-unlock streak, for backing off brute-force against a live instance.
     pub failed_attempts: Mutex<u32>,
     pub last_attempt: Mutex<Option<SystemTime>>,
 }
@@ -79,15 +74,12 @@ pub fn forget_key() {
     }
 }
 
-/// Records fresh user activity, resetting the idle auto-lock clock.
 pub fn touch_activity(state: &AppState) {
     if let Ok(mut t) = state.last_activity.lock() {
         *t = SystemTime::now();
     }
 }
 
-/// Caches the vault's configured idle auto-lock period and resets the activity
-/// clock. Called right after a successful unlock.
 pub fn refresh_auto_lock(state: &AppState, vault: &Vault) {
     let minutes = vault
         .get_meta(AUTO_LOCK_META_KEY)

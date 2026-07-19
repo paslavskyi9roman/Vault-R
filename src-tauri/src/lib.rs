@@ -7,9 +7,8 @@ use tauri::{Emitter, Manager};
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        // Registered first, as the plugin requires. A second launch focuses the
-        // running window instead of opening a rival instance that would race the
-        // same vault file (last-writer-wins).
+        // Must be registered first (plugin requirement). Without it, a second
+        // launch would race the same vault file instead of focusing this one.
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.set_focus();
@@ -19,16 +18,13 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .manage(AppState::default())
         .setup(|app| {
-            // Keep the secrets window out of screen recordings and screen
-            // shares (Windows/macOS; a no-op on Linux, which lacks the API).
+            // No-op on Linux, which has no screen-capture-exclusion API.
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.set_content_protected(true);
             }
 
-            // Backend-enforced idle auto-lock. The webview only *reports*
-            // activity (`notify_activity`); the timeout is enforced here so a
-            // frozen or compromised renderer cannot hold the vault open, and a
-            // suspended machine locks on wake (wall-clock elapsed time counts).
+            // Enforced here, not in the webview, so a frozen or compromised
+            // renderer can't hold the vault open past the idle period.
             let handle = app.handle().clone();
             std::thread::spawn(move || loop {
                 std::thread::sleep(std::time::Duration::from_secs(10));
@@ -60,8 +56,6 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            // Zeroize the key on close rather than relying on the OS to reclaim
-            // the process's memory.
             if let tauri::WindowEvent::CloseRequested { .. } = event {
                 let _ = commands::perform_lock(window.app_handle());
             }

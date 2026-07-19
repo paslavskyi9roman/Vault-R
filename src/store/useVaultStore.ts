@@ -1618,11 +1618,9 @@ export const useVaultStore = create<VaultState>((set, get) => ({
     })),
 }));
 
-/// The state a lock resets to. Beyond the primary `variables`, several
-/// overlays (Compare, History, link/group popovers, the importer, the command
-/// palette) cache decrypted values; if any is open at lock time its data would
-/// otherwise linger in the JS heap and re-surface on the next unlock. This
-/// clears every value-bearing slice and closes those overlays.
+/// Also clears the Compare/History/link/import/command-palette caches and
+/// closes their overlays — left open, they'd resurface old secrets after
+/// the next unlock.
 function lockedState(): Partial<VaultState> {
   return {
     locked: true,
@@ -1639,7 +1637,6 @@ function lockedState(): Partial<VaultState> {
     pwCurrent: '',
     pwNew: '',
     pwConfirm: '',
-    // Value-bearing caches from the overlays.
     historySnapshots: [],
     snapshotDiff: [],
     compareRows: [],
@@ -1650,7 +1647,6 @@ function lockedState(): Partial<VaultState> {
     importText: '',
     cmdkResults: [],
     cmdkQuery: '',
-    // Close every overlay and drop its transient selections/reveal maps.
     settingsOpen: false,
     historyOpen: false,
     expandedSnapshotId: null,

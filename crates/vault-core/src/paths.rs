@@ -18,9 +18,7 @@ pub fn data_dir() -> Result<PathBuf> {
     Ok(dir)
 }
 
-/// Tightens a freshly written secret file to owner-only (`0600`) on Unix
-/// (Linux/macOS). A no-op on Windows, where the per-user profile ACL on
-/// `%APPDATA%` already restricts access to the owner.
+/// No-op on Windows, where the per-user `%APPDATA%` ACL already restricts access.
 #[cfg(unix)]
 pub fn restrict_file(path: &std::path::Path) {
     use std::os::unix::fs::PermissionsExt;
@@ -30,7 +28,6 @@ pub fn restrict_file(path: &std::path::Path) {
 #[cfg(not(unix))]
 pub fn restrict_file(_path: &std::path::Path) {}
 
-/// Tightens a vault directory to owner-only (`0700`) on Unix.
 #[cfg(unix)]
 fn restrict_dir(path: &std::path::Path) {
     use std::os::unix::fs::PermissionsExt;

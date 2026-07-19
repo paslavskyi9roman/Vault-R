@@ -66,11 +66,8 @@ pub fn vault_create(password: String, remember: bool, state: State<AppState>) ->
     Ok(())
 }
 
-/// Sleeps for an escalating delay once several unlock attempts in a row have
-/// failed, to slow brute-force guessing against a running instance. Argon2id
-/// already dominates the per-attempt cost; this just removes the incentive to
-/// hammer a live process. Offline attacks on the file are unaffected (they are
-/// Argon2-bounded regardless).
+/// Escalating delay after repeated failed unlocks, to blunt brute-forcing a
+/// running instance. Offline attacks on the file stay Argon2-bounded regardless.
 fn throttle_unlock(state: &AppState) {
     let attempts = state.failed_attempts.lock().map(|a| *a).unwrap_or(0);
     if attempts >= 3 {
@@ -79,7 +76,6 @@ fn throttle_unlock(state: &AppState) {
     }
 }
 
-/// Resets the failed-attempt counter on success, or increments it on failure.
 fn record_unlock(state: &AppState, ok: bool) {
     if let Ok(mut a) = state.failed_attempts.lock() {
         *a = if ok { 0 } else { a.saturating_add(1) };
@@ -133,9 +129,7 @@ pub fn vault_unlock_with_recovery(code: String, state: State<AppState>) -> Resul
     Ok(())
 }
 
-/// Locks the vault and reclaims any secret still sitting on the clipboard from
-/// before the lock. Shared by the `vault_lock` command, the idle auto-lock
-/// enforcer, and the window-close handler.
+/// Shared by `vault_lock`, the idle auto-lock enforcer, and window-close.
 pub fn perform_lock(app: &tauri::AppHandle) -> Result<(), String> {
     let state = app.state::<AppState>();
     if let Ok(mut last) = state.last_copied.lock() {
@@ -167,10 +161,8 @@ pub fn vault_lock(app: tauri::AppHandle) -> Result<(), String> {
     perform_lock(&app)
 }
 
-/// Records webview activity for the backend idle auto-lock enforcer. The
-/// webview reports pointer/keyboard activity here; the enforcer (in `run`)
-/// owns the actual timeout so a frozen or compromised renderer cannot keep the
-/// vault open past the idle period.
+/// The webview only reports activity; the enforcer in `run` owns the timeout,
+/// so a frozen or compromised renderer can't keep the vault open.
 #[tauri::command]
 pub fn notify_activity(state: State<AppState>) {
     state::touch_activity(&state);
@@ -229,8 +221,7 @@ pub fn vault_has_recovery_code(state: State<AppState>) -> Result<bool, String> {
 pub fn vault_generate_recovery_code(state: State<AppState>) -> Result<String, String> {
     state::with_vault(&state, |v| v.rotate_backup().map(|_| ()))?;
     let code = state::with_vault_mut(&state, |v| v.generate_recovery_code())?;
-    // Stage the code so `save_recovery_kit` can write it without the webview
-    // having to hand it back (an injected script could substitute its own).
+    // Staged so an injected script can't substitute its own code on save.
     if let Ok(mut pending) = state.pending_recovery_code.lock() {
         *pending = Some(Zeroizing::new(code.clone()));
     }
@@ -241,10 +232,8 @@ pub fn vault_generate_recovery_code(state: State<AppState>) -> Result<String, St
 // Backups
 // ---------------------------------------------------------------------
 
-/// Writes the printable recovery kit to a path the user picked. The wording
-/// lives here rather than in the frontend so the warnings cannot drift. The
-/// code comes from the backend's staged copy (see `vault_generate_recovery_code`),
-/// not from the webview, and the vault must be unlocked.
+/// Writes the recovery kit from the staged copy in `AppState`, never from an
+/// IPC argument — see `vault_generate_recovery_code`.
 #[tauri::command]
 pub fn save_recovery_kit(path: String, state: State<AppState>) -> Result<(), String> {
     if state
@@ -656,8 +645,7 @@ pub fn apply_gitignore_patterns(
     patterns: Vec<String>,
     state: State<AppState>,
 ) -> Result<usize, String> {
-    // Gate on unlock: this writes to a frontend-supplied path and only makes
-    // sense as a follow-up to an unlocked-vault safety scan.
+    // Only makes sense as a follow-up to an unlocked-vault safety scan.
     if state
         .vault
         .lock()
