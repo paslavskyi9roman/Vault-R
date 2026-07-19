@@ -1,0 +1,213 @@
+.header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-1);
+}
+
+.title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+  flex: 1;
+}
+
+.sub {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-faint);
+  margin-bottom: 18px;
+}
+
+.empty {
+  font-size: 12.5px;
+  color: var(--text-faint);
+}
+
+.item {
+  padding: var(--space-4) 0;
+  border-bottom: 1px solid var(--border-light);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-2);
+  margin: calc(var(--space-2) * -1);
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+  transition: background-color var(--t-hover);
+}
+
+.row:hover {
+  background: var(--row-hover);
+}
+
+.row:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* Pivots rather than swapping characters, so expanding a snapshot animates. */
+.chevron {
+  color: var(--text-faint);
+  margin-top: 3px;
+  flex-shrink: 0;
+  transition:
+    color var(--t-hover),
+    transform var(--dur-2) var(--ease-standard);
+}
+
+.row[aria-expanded='true'] .chevron {
+  transform: rotate(90deg);
+}
+
+.row:hover .chevron {
+  color: var(--text-dim);
+}
+
+/* Icon-only, so it needs to be square rather than text-width. */
+.diffIconBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px 5px;
+}
+
+.textWrap {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.time {
+  font-size: 11px;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+}
+
+.summary {
+  font-size: 13px;
+  color: var(--text);
+}
+
+.badgeWrap {
+  display: flex;
+  gap: 5px;
+  flex-shrink: 0;
+  padding-top: 2px;
+}
+
+.badge {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 700;
+}
+
+.noChange {
+  font-size: 10.5px;
+  color: var(--text-faint);
+  flex-shrink: 0;
+}
+
+.restore {
+  align-self: flex-start;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent);
+  padding: var(--space-1) 10px;
+  border-radius: 5px;
+}
+
+.restore:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.diffWrap {
+  margin: var(--space-1) 0 2px 18px;
+  border-left: 1px solid var(--border);
+  padding-left: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.diffEmpty {
+  margin: var(--space-1) 0 2px 18px;
+  font-size: 11.5px;
+  color: var(--text-faint);
+}
+
+.diffRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* Kind drives the colour from CSS, which retires the kindColor() helper. */
+.diffMark {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  width: 10px;
+  flex-shrink: 0;
+}
+
+.diffMark[data-kind='added'] {
+  color: var(--accent);
+}
+.diffMark[data-kind='removed'] {
+  color: var(--danger);
+}
+.diffMark[data-kind='changed'] {
+  color: var(--env-staging);
+}
+
+.badge[data-kind='added'] {
+  color: var(--accent);
+}
+.badge[data-kind='removed'] {
+  color: var(--danger);
+}
+.badge[data-kind='changed'] {
+  color: var(--env-staging);
+}
+
+.diffBody {
+  flex: 1;
+  min-width: 0;
+}
+
+.diffKey {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--key);
+}
+
+.diffValue {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diffBtn {
+  font-size: 10px;
+  padding: 3px var(--space-2);
+  border-radius: 4px;
+  flex-shrink: 0;
+}

@@ -1,0 +1,138 @@
+/* Sits above every other overlay and darkens further, since it is the only
+   thing on screen during first run. */
+.backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(6, 7, 10, 0.75);
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6);
+  opacity: 0;
+  transition: opacity var(--t-enter);
+}
+
+.backdrop.isEntered {
+  opacity: 1;
+}
+
+.backdrop.isExiting {
+  opacity: 0;
+  transition: opacity var(--t-exit);
+}
+
+.card {
+  width: 440px;
+  max-width: 100%;
+  max-height: 100%;
+  overflow-y: auto;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--edge-top), var(--elev-3);
+  padding: var(--space-7);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transform: translateY(8px) scale(0.98);
+  transition: transform var(--t-enter);
+  will-change: transform;
+}
+
+.backdrop.isEntered .card {
+  transform: translateY(0) scale(1);
+}
+
+.backdrop.isExiting .card {
+  transform: translateY(4px) scale(0.99);
+  transition: transform var(--t-exit);
+}
+
+.glyph {
+  font-family: var(--font-mono);
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 26px;
+}
+
+.title {
+  font-size: 19px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.sub {
+  font-size: 13px;
+  color: var(--text-dim);
+  line-height: 1.5;
+  margin-bottom: var(--space-2);
+}
+
+.featureRow {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin: var(--space-1) 0 14px;
+}
+
+.feature {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.featureDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+}
+
+.nameRow {
+  display: flex;
+  gap: var(--space-3);
+  margin-bottom: 10px;
+}
+
+.nameInput {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  padding: var(--space-3) 10px;
+}
+
+.btnRow {
+  display: flex;
+  gap: 10px;
+}
+
+.btnRowPrimary {
+  flex: 1;
+}
+
+.stepDots {
+  display: flex;
+  gap: var(--space-2);
+  justify-content: center;
+  margin-top: 10px;
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--border);
+  transition:
+    background-color var(--t-hover),
+    transform var(--t-hover);
+}
+
+.dot[data-active='true'] {
+  background: var(--accent);
+  transform: scale(1.25);
+}

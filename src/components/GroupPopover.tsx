@@ -1,56 +1,49 @@
 import { useVaultStore } from '../store/useVaultStore';
-import { overlayBackdropStyle, modalStyle, modalHeaderStyle, modalTitleStyle, modalSubStyle, closeXStyle } from './overlayStyles';
+import { usePresence, useLastPresent } from '../lib/usePresence';
+import { CloseIcon } from './icons';
+import styles from './GroupPopover.module.css';
 
 export function GroupPopover() {
   const groupPopoverGroupId = useVaultStore((s) => s.groupPopoverGroupId);
-  const groupPopoverMembers = useVaultStore((s) => s.groupPopoverMembers);
+  const membersLive = useVaultStore((s) => s.groupPopoverMembers);
   const closeGroupPopover = useVaultStore((s) => s.closeGroupPopover);
   const unlinkFromPopover = useVaultStore((s) => s.unlinkFromPopover);
 
-  if (!groupPopoverGroupId) return null;
+  const { mounted, state } = usePresence(!!groupPopoverGroupId, 120);
+  // closeGroupPopover empties the member list, so the exit frames need the
+  // last version that still had rows in it.
+  const members = useLastPresent(membersLive.length ? membersLive : null) ?? [];
+
+  if (!mounted) return null;
 
   return (
     <>
-      <div style={overlayBackdropStyle} onClick={closeGroupPopover} />
-      <div style={modalStyle}>
-        <div style={modalHeaderStyle}>
-          <span style={modalTitleStyle}>Linked secret group</span>
-          <button style={closeXStyle} onClick={closeGroupPopover}>
-            &times;
-          </button>
-        </div>
-        <div style={modalSubStyle}>Editing the value in any one of these updates all of them.</div>
-        {groupPopoverMembers.map((m) => (
-          <div key={m.variable.id} style={rowStyle}>
-            <span style={targetStyle}>
-              {m.repoName} / {m.envName}
-            </span>
-            <span style={keyStyle}>{m.variable.key}</span>
-            <button style={unlinkBtnStyle} onClick={() => void unlinkFromPopover(m.variable.id)}>
-              Unlink
+      <div className={`v-backdrop is-${state}`} onClick={closeGroupPopover} />
+      <div className="v-modal-wrap">
+        <div className={`v-modal is-${state}`}>
+          <div className="v-modal-header">
+            <span className="v-modal-title">Linked secret group</span>
+            <button className="v-close-x" onClick={closeGroupPopover} aria-label="Close">
+              <CloseIcon size={13} />
             </button>
           </div>
-        ))}
+          <div className="v-modal-sub">Editing the value in any one of these updates all of them.</div>
+          {members.map((m) => (
+            <div key={m.variable.id} className={styles.row}>
+              <span className={styles.target}>
+                {m.repoName} / {m.envName}
+              </span>
+              <span className={styles.key}>{m.variable.key}</span>
+              <button
+                className={`v-btn v-btn--danger ${styles.unlink}`}
+                onClick={() => void unlinkFromPopover(m.variable.id)}
+              >
+                Unlink
+              </button>
+            </div>
+          ))}
+        </div>
       </div>
     </>
   );
 }
-
-const rowStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: '10px',
-  padding: '9px 0',
-  borderTop: '1px solid var(--border-light)',
-};
-const targetStyle: React.CSSProperties = { fontFamily: 'var(--font-mono)', fontSize: '13px', color: 'var(--text)', flex: 1 };
-const keyStyle: React.CSSProperties = { fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--key)' };
-const unlinkBtnStyle: React.CSSProperties = {
-  fontSize: '11px',
-  color: 'var(--danger)',
-  background: 'transparent',
-  border: '1px solid var(--border)',
-  borderRadius: '5px',
-  padding: '4px 8px',
-  cursor: 'pointer',
-};

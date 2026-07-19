@@ -1,6 +1,9 @@
 import { type KeyboardEvent } from 'react';
 import { useVaultStore } from '../store/useVaultStore';
 import { envColor } from '../lib/envColor';
+import { Spinner } from './Spinner';
+import { ChevronIcon, PlusIcon, PencilIcon, DuplicateIcon, CloseIcon } from './icons';
+import styles from './Sidebar.module.css';
 
 export function Sidebar() {
   const repos = useVaultStore((s) => s.repos);
@@ -18,6 +21,7 @@ export function Sidebar() {
   const duplicatingEnvId = useVaultStore((s) => s.duplicatingEnvId);
   const duplicateNewName = useVaultStore((s) => s.duplicateNewName);
   const duplicateCopyValues = useVaultStore((s) => s.duplicateCopyValues);
+  const duplicateBusy = useVaultStore((s) => s.duplicateBusy);
 
   const toggleExpandRepo = useVaultStore((s) => s.toggleExpandRepo);
   const toggleAddRepo = useVaultStore((s) => s.toggleAddRepo);
@@ -42,11 +46,16 @@ export function Sidebar() {
   const submitDuplicateEnv = useVaultStore((s) => s.submitDuplicateEnv);
 
   return (
-    <div style={sidebarStyle}>
-      <div style={sidebarHeaderStyle}>
-        <span style={sidebarHeaderTextStyle}>REPOSITORIES</span>
-        <button style={addBtnStyle} onClick={toggleAddRepo}>
-          +
+    <nav className={styles.sidebar}>
+      <div className={styles.header}>
+        <span className={styles.headerText}>REPOSITORIES</span>
+        <button
+          className={`v-btn ${styles.addBtn}`}
+          onClick={toggleAddRepo}
+          title="Add a repository"
+          aria-label="Add a repository"
+        >
+          <PlusIcon size={12} />
         </button>
       </div>
 
@@ -57,11 +66,10 @@ export function Sidebar() {
           onChange={setNewRepoName}
           onSubmit={() => void submitAddRepo()}
           onCancel={toggleAddRepo}
-          style={inlineAddFormStyle}
         />
       )}
 
-      <div style={repoListStyle}>
+      <div className={styles.repoList}>
         {repos.map((repo) => {
           const expanded = !!expandedRepos[repo.id];
           return (
@@ -74,43 +82,44 @@ export function Sidebar() {
                   onSubmit={() => void submitRename()}
                   onCancel={cancelRename}
                   submitLabel="Save"
-                  style={inlineAddFormStyle}
                 />
               ) : (
-                <div style={repoRowStyle} onClick={() => toggleExpandRepo(repo.id)}>
-                  <span style={chevronStyle}>{expanded ? '▾' : '▸'}</span>
-                  <span style={repoNameStyle}>{repo.name}</span>
-                  <span style={countPillStyle}>{repo.envs.length}</span>
-                  <span
-                    style={rowActionStyle}
-                    title={`Add environment to ${repo.name}`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      startAddEnv(repo.id);
-                    }}
+                <div className={styles.row}>
+                  <button
+                    className={styles.repoMain}
+                    onClick={() => toggleExpandRepo(repo.id)}
+                    aria-expanded={expanded}
                   >
-                    +
-                  </span>
-                  <span
-                    style={rowActionStyle}
-                    title={`Rename ${repo.name}`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      startRenameRepo(repo.id, repo.name);
-                    }}
-                  >
-                    &#9998;
-                  </span>
-                  <span
-                    style={rowActionDangerStyle}
-                    title={`Delete ${repo.name}`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      requestDeleteRepo(repo.id, repo.name);
-                    }}
-                  >
-                    &times;
-                  </span>
+                    <ChevronIcon size={11} className={styles.chevron} />
+                    <span className={styles.repoName}>{repo.name}</span>
+                    <span className={styles.countPill}>{repo.envs.length}</span>
+                  </button>
+                  <div className={styles.actions}>
+                    <button
+                      className={styles.action}
+                      title={`Add environment to ${repo.name}`}
+                      aria-label={`Add environment to ${repo.name}`}
+                      onClick={() => startAddEnv(repo.id)}
+                    >
+                      <PlusIcon size={12} />
+                    </button>
+                    <button
+                      className={styles.action}
+                      title={`Rename ${repo.name}`}
+                      aria-label={`Rename ${repo.name}`}
+                      onClick={() => startRenameRepo(repo.id, repo.name)}
+                    >
+                      <PencilIcon size={12} />
+                    </button>
+                    <button
+                      className={`${styles.action} ${styles.actionDanger}`}
+                      title={`Delete ${repo.name}`}
+                      aria-label={`Delete ${repo.name}`}
+                      onClick={() => requestDeleteRepo(repo.id, repo.name)}
+                    >
+                      <CloseIcon size={12} />
+                    </button>
+                  </div>
                 </div>
               )}
 
@@ -128,15 +137,15 @@ export function Sidebar() {
                           onSubmit={() => void submitRename()}
                           onCancel={cancelRename}
                           submitLabel="Save"
-                          style={inlineAddEnvFormStyle}
+                          nested
                         />
                       );
                     }
                     if (duplicatingEnvId === env.id) {
                       return (
-                        <div key={env.id} style={duplicateFormStyle}>
+                        <div key={env.id} className={styles.duplicateForm}>
                           <input
-                            style={inlineAddInputStyle}
+                            className={`v-input ${styles.inlineInput}`}
                             placeholder="new-env-name"
                             value={duplicateNewName}
                             onChange={(e) => setDuplicateNewName(e.target.value)}
@@ -148,68 +157,65 @@ export function Sidebar() {
                             spellCheck={false}
                             autoComplete="off"
                           />
-                          <label style={duplicateCheckboxLabelStyle}>
+                          <label className={styles.duplicateCheckbox}>
                             <input
+                              className="v-check"
                               type="checkbox"
                               checked={duplicateCopyValues}
                               onChange={toggleDuplicateCopyValues}
                             />
                             copy values
                           </label>
-                          <button style={inlineAddConfirmStyle} onClick={() => void submitDuplicateEnv()}>
+                          <button
+                            className={`v-btn ${styles.inlineConfirm}`}
+                            onClick={() => void submitDuplicateEnv()}
+                            disabled={duplicateBusy}
+                          >
                             Duplicate
+                            {duplicateBusy && <Spinner size={10} />}
                           </button>
-                          <button style={inlineAddCancelStyle} onClick={cancelDuplicateEnv}>
-                            &times;
+                          <button className={styles.inlineCancel} onClick={cancelDuplicateEnv} aria-label="Cancel">
+                            <CloseIcon size={12} />
                           </button>
                         </div>
                       );
                     }
                     return (
-                      <div
-                        key={env.id}
-                        style={{
-                          ...envRowStyle,
-                          background: isActive ? 'var(--accent-dim)' : 'transparent',
-                          borderLeft: isActive ? '2px solid var(--accent)' : '2px solid transparent',
-                        }}
-                        onClick={() => void selectEnv(repo.id, env.id)}
-                      >
-                        <span style={{ ...dotStyle, background: envColor(env.name) }} />
-                        <span style={{ ...envNameStyle, color: isActive ? 'var(--text)' : 'var(--text-dim)' }}>
-                          {env.name}
-                        </span>
-                        <span style={envCountStyle}>{env.varCount}</span>
-                        <span
-                          style={rowActionStyle}
-                          title={`Duplicate ${env.name}`}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            startDuplicateEnv(env.id, env.name);
-                          }}
-                        >
-                          &#10697;
-                        </span>
-                        <span
-                          style={rowActionStyle}
-                          title={`Rename ${env.name}`}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            startRenameEnv(env.id, env.name);
-                          }}
-                        >
-                          &#9998;
-                        </span>
-                        <span
-                          style={rowActionDangerStyle}
-                          title={`Delete ${env.name}`}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            requestDeleteEnv(env.id, repo.name, env.name);
-                          }}
-                        >
-                          &times;
-                        </span>
+                      <div key={env.id} className={styles.row} data-active={isActive}>
+                        <button className={styles.envMain} onClick={() => void selectEnv(repo.id, env.id)}>
+                          <span
+                            className={styles.dot}
+                            style={{ ['--dot' as string]: envColor(env.name) }}
+                          />
+                          <span className={styles.envName}>{env.name}</span>
+                          <span className={styles.envCount}>{env.varCount}</span>
+                        </button>
+                        <div className={styles.actions}>
+                          <button
+                            className={styles.action}
+                            title={`Duplicate ${env.name}`}
+                            aria-label={`Duplicate ${env.name}`}
+                            onClick={() => startDuplicateEnv(env.id, env.name)}
+                          >
+                            <DuplicateIcon size={12} />
+                          </button>
+                          <button
+                            className={styles.action}
+                            title={`Rename ${env.name}`}
+                            aria-label={`Rename ${env.name}`}
+                            onClick={() => startRenameEnv(env.id, env.name)}
+                          >
+                            <PencilIcon size={12} />
+                          </button>
+                          <button
+                            className={`${styles.action} ${styles.actionDanger}`}
+                            title={`Delete ${env.name}`}
+                            aria-label={`Delete ${env.name}`}
+                            onClick={() => requestDeleteEnv(env.id, repo.name, env.name)}
+                          >
+                            <CloseIcon size={12} />
+                          </button>
+                        </div>
                       </div>
                     );
                   })}
@@ -221,7 +227,7 @@ export function Sidebar() {
                       onChange={setNewEnvName}
                       onSubmit={() => void submitAddEnv(repo.id)}
                       onCancel={cancelAddEnv}
-                      style={inlineAddEnvFormStyle}
+                      nested
                     />
                   )}
                 </div>
@@ -231,16 +237,16 @@ export function Sidebar() {
         })}
 
         {repos.length === 0 && !addingRepo && (
-          <div style={emptyHintStyle}>No repositories yet. Click + to add one.</div>
+          <div className={styles.emptyHint}>No repositories yet. Click + to add one.</div>
         )}
       </div>
 
-      <div style={sidebarFooterStyle}>
-        <div style={sidebarFooterLineStyle}>
+      <div className={styles.footer}>
+        <div className={styles.footerLine}>
           {linkedGroupCount} linked secret group{linkedGroupCount === 1 ? '' : 's'} across repos
         </div>
       </div>
-    </div>
+    </nav>
   );
 }
 
@@ -251,16 +257,16 @@ function InlineForm(props: {
   onSubmit: () => void;
   onCancel: () => void;
   submitLabel?: string;
-  style: React.CSSProperties;
+  nested?: boolean;
 }) {
   function onKeyDown(e: KeyboardEvent<HTMLInputElement>) {
     if (e.key === 'Enter') props.onSubmit();
     if (e.key === 'Escape') props.onCancel();
   }
   return (
-    <div style={props.style}>
+    <div className={`${styles.inlineForm} ${props.nested ? styles.inlineFormEnv : ''}`}>
       <input
-        style={inlineAddInputStyle}
+        className={`v-input ${styles.inlineInput}`}
         placeholder={props.placeholder}
         value={props.value}
         onChange={(e) => props.onChange(e.target.value)}
@@ -269,144 +275,12 @@ function InlineForm(props: {
         spellCheck={false}
         autoComplete="off"
       />
-      <button style={inlineAddConfirmStyle} onClick={props.onSubmit}>
+      <button className={`v-btn ${styles.inlineConfirm}`} onClick={props.onSubmit}>
         {props.submitLabel ?? 'Add'}
       </button>
-      <button style={inlineAddCancelStyle} onClick={props.onCancel}>
-        &times;
+      <button className={styles.inlineCancel} onClick={props.onCancel} aria-label="Cancel">
+        <CloseIcon size={12} />
       </button>
     </div>
   );
 }
-
-const sidebarStyle: React.CSSProperties = {
-  width: '260px',
-  flexShrink: 0,
-  background: 'var(--panel)',
-  borderRight: '1px solid var(--border)',
-  display: 'flex',
-  flexDirection: 'column',
-  overflow: 'hidden',
-};
-const sidebarHeaderStyle: React.CSSProperties = { display: 'flex', alignItems: 'center', padding: '14px 14px 8px' };
-const sidebarHeaderTextStyle: React.CSSProperties = {
-  fontSize: '10.5px',
-  fontWeight: 700,
-  letterSpacing: '0.8px',
-  color: 'var(--text-faint)',
-  flex: 1,
-};
-const addBtnStyle: React.CSSProperties = {
-  width: '20px',
-  height: '20px',
-  borderRadius: '5px',
-  border: '1px solid var(--border)',
-  background: 'transparent',
-  color: 'var(--text-dim)',
-  cursor: 'pointer',
-  fontSize: '13px',
-  lineHeight: '1',
-};
-const rowActionStyle: React.CSSProperties = {
-  width: '16px',
-  height: '16px',
-  borderRadius: '4px',
-  color: 'var(--text-faint)',
-  cursor: 'pointer',
-  fontSize: '12px',
-  textAlign: 'center',
-  lineHeight: '16px',
-  flexShrink: 0,
-};
-const rowActionDangerStyle: React.CSSProperties = { ...rowActionStyle, fontSize: '14px' };
-const repoListStyle: React.CSSProperties = { flex: 1, overflowY: 'auto', paddingBottom: '10px' };
-const inlineAddFormStyle: React.CSSProperties = { display: 'flex', gap: '5px', padding: '4px 14px 10px' };
-const inlineAddEnvFormStyle: React.CSSProperties = { display: 'flex', gap: '5px', padding: '4px 14px 8px 30px' };
-const duplicateFormStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: '6px',
-  padding: '4px 14px 8px 30px',
-  flexWrap: 'wrap',
-};
-const duplicateCheckboxLabelStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: '4px',
-  fontSize: '11px',
-  color: 'var(--text-faint)',
-  whiteSpace: 'nowrap',
-};
-const inlineAddInputStyle: React.CSSProperties = {
-  flex: 1,
-  minWidth: 0,
-  fontFamily: 'var(--font-mono)',
-  fontSize: '12px',
-  background: 'var(--panel-2)',
-  border: '1px solid var(--border)',
-  borderRadius: '5px',
-  color: 'var(--text)',
-  padding: '5px 8px',
-  outline: 'none',
-};
-const inlineAddConfirmStyle: React.CSSProperties = {
-  fontSize: '11px',
-  fontWeight: 700,
-  color: 'var(--accent)',
-  background: 'transparent',
-  border: '1px solid var(--border)',
-  borderRadius: '5px',
-  padding: '0 8px',
-  cursor: 'pointer',
-};
-const inlineAddCancelStyle: React.CSSProperties = {
-  fontSize: '13px',
-  color: 'var(--text-faint)',
-  background: 'transparent',
-  border: 'none',
-  cursor: 'pointer',
-};
-const repoRowStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: '8px',
-  padding: '9px 14px',
-  cursor: 'pointer',
-  userSelect: 'none',
-};
-const chevronStyle: React.CSSProperties = { color: 'var(--text-faint)', fontSize: '10px', width: '10px' };
-const repoNameStyle: React.CSSProperties = {
-  fontFamily: 'var(--font-mono)',
-  fontSize: '13px',
-  color: 'var(--text)',
-  fontWeight: 600,
-  flex: 1,
-  overflow: 'hidden',
-  textOverflow: 'ellipsis',
-  whiteSpace: 'nowrap',
-};
-const countPillStyle: React.CSSProperties = {
-  fontSize: '10px',
-  color: 'var(--text-faint)',
-  background: 'var(--panel-2)',
-  borderRadius: '8px',
-  padding: '1px 6px',
-};
-const envRowStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: '9px',
-  padding: '7px 14px 7px 30px',
-  cursor: 'pointer',
-};
-const dotStyle: React.CSSProperties = { width: '6px', height: '6px', borderRadius: '50%', flexShrink: 0 };
-const envNameStyle: React.CSSProperties = { fontFamily: 'var(--font-mono)', fontSize: '12.5px', flex: 1 };
-const envCountStyle: React.CSSProperties = { fontSize: '10.5px', color: 'var(--text-faint)' };
-const sidebarFooterStyle: React.CSSProperties = { padding: '10px 14px', borderTop: '1px solid var(--border)' };
-const sidebarFooterLineStyle: React.CSSProperties = { fontSize: '10.5px', color: 'var(--text-faint)', lineHeight: 1.5 };
-const emptyHintStyle: React.CSSProperties = {
-  padding: '10px 14px',
-  fontSize: '11.5px',
-  color: 'var(--text-faint)',
-  lineHeight: 1.5,
-};

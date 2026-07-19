@@ -1,48 +1,75 @@
 @import './tokens.css';
-@import './auth.css';
 
-html,
-body {
-  margin: 0;
-  padding: 0;
-  background: var(--bg);
-  color: var(--text);
-  font-family: var(--font-sans);
-  overflow: hidden;
-}
+/* Explicit order so the cascade is decided by intent, not by bundler import
+   order. Component CSS Modules stay unlayered, which puts them above both. */
+@layer reset, primitives;
 
-* {
-  box-sizing: border-box;
-}
+@layer reset {
+  html,
+  body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-sans);
+    overflow: hidden;
+  }
 
-::selection {
-  background: var(--selection-bg);
-  color: #fff;
-}
+  * {
+    box-sizing: border-box;
+  }
 
-input,
-textarea,
-button {
-  font-family: inherit;
-}
+  ::selection {
+    background: var(--selection-bg);
+    color: #fff;
+  }
 
-button {
-  font: inherit;
-}
+  input,
+  textarea,
+  button {
+    font-family: inherit;
+  }
 
-::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-}
-::-webkit-scrollbar-thumb {
-  background: var(--panel-3);
-  border-radius: 6px;
-}
-::-webkit-scrollbar-track {
-  background: transparent;
-}
+  button {
+    font: inherit;
+  }
 
-#root {
-  height: 100vh;
-  width: 100%;
+  /* Baseline keyboard focus for everything, including the many elements still
+     on inline styles. Components that want a different ring override it; they
+     are unlayered, so they win. */
+  /* No border-radius here on purpose: box-shadow already follows whatever
+     radius the element has, and forcing one would square off the round
+     icon buttons the moment they take focus. */
+  :focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+  }
+
+  /* Mouse users keep getting no ring, which is what :focus-visible is for —
+     but text fields are the exception, since a caret alone is easy to lose. */
+  input:focus,
+  textarea:focus {
+    outline: none;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--panel-3);
+    border-radius: 6px;
+    transition: background-color var(--t-hover);
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--border-hover);
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  #root {
+    height: 100vh;
+    width: 100%;
+  }
 }

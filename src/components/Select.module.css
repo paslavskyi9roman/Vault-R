@@ -1,0 +1,100 @@
+.trigger {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  padding: var(--space-3) var(--space-4);
+  cursor: pointer;
+  text-align: left;
+  transition:
+    border-color var(--t-hover),
+    background-color var(--t-hover),
+    box-shadow var(--t-hover);
+}
+
+.trigger:hover {
+  border-color: var(--border-hover);
+}
+
+.trigger:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
+}
+
+.trigger[aria-expanded='true'] {
+  border-color: var(--accent);
+}
+
+.label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.label[data-placeholder='true'] {
+  color: var(--text-faint);
+}
+
+.chevron {
+  color: var(--text-faint);
+  flex-shrink: 0;
+  /* Points right at rest; down when open. */
+  transform: rotate(90deg);
+  transition: transform var(--dur-2) var(--ease-standard);
+}
+
+.trigger[aria-expanded='true'] .chevron {
+  transform: rotate(-90deg);
+}
+
+/* Portalled to the body so a slideover's overflow cannot clip it. */
+.list {
+  background: var(--panel-2);
+  border: 1px solid var(--border-hover);
+  border-radius: 7px;
+  box-shadow: var(--edge-top), var(--elev-3);
+  padding: var(--space-1);
+  max-height: 240px;
+  overflow-y: auto;
+  z-index: var(--z-toast);
+  /* Entrance comes from the global .v-enter class, not an animation declared
+     here: a module hashes the keyframe name and the animation would silently
+     never run, leaving the list stuck at opacity 0. */
+  --enter-dur: var(--dur-2);
+}
+
+.option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 7px 10px;
+  border-radius: 5px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--text-dim);
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background-color var(--dur-1) var(--ease-standard),
+    color var(--dur-1) var(--ease-standard);
+}
+
+/* Highlight follows the keyboard, and the pointer sets it on enter, so there
+   is only ever one active row however you are driving it. */
+.option[data-active='true'] {
+  background: var(--panel-3);
+  color: var(--text);
+}
+
+.option[aria-selected='true'] {
+  color: var(--accent);
+}

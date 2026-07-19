@@ -1,0 +1,79 @@
+/* --accent-tone is set per-dialog so the danger and non-danger variants share
+   one rule set. */
+.dialog {
+  width: 400px;
+  border-color: var(--accent-tone);
+}
+
+.title {
+  margin-bottom: var(--space-3);
+}
+
+.message {
+  font-size: 12.5px;
+  color: var(--text-dim);
+  line-height: 1.6;
+  margin-bottom: var(--space-5);
+}
+
+.typeHint {
+  font-size: 11.5px;
+  color: var(--text-faint);
+  margin-bottom: 7px;
+}
+
+.typeTarget {
+  font-family: var(--font-mono);
+  color: var(--text);
+}
+
+.typeInput {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  padding: var(--space-3) 10px;
+  margin-bottom: var(--space-5);
+}
+
+/* The base .v-input focus ring is mint. Left alone it stacks a green halo
+   around a red border, reading as two borders in two colours — so the ring is
+   restated in the dialog's own tone, as a soft halo rather than a hard second
+   ring. */
+.typeInput:focus,
+.typeInput:focus-visible {
+  border-color: var(--accent-tone);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-tone) 22%, transparent);
+}
+
+.actions {
+  display: flex;
+  gap: var(--space-3);
+  justify-content: flex-end;
+}
+
+.confirmBtn {
+  font-size: 13px;
+  color: #0b1210;
+  background: var(--accent-tone);
+  border-color: var(--accent-tone);
+}
+
+.confirmBtn:hover {
+  color: #0b1210;
+  background: var(--accent-tone);
+  border-color: var(--accent-tone);
+  filter: brightness(1.08);
+}
+
+.confirmBtn:focus-visible {
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent-tone);
+}
+
+/* This module is unlayered, so its `color` outranks the primitives layer's
+   [data-pending] rule. Restate it here or the label shows through the spinner. */
+.confirmBtn[data-pending='true'] {
+  color: transparent;
+}
+
+.confirmBtn[data-pending='true'] > :global(.v-spinner) {
+  color: #0b1210;
+}

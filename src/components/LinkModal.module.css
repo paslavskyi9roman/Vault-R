@@ -1,0 +1,46 @@
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 0;
+  border-top: 1px solid var(--border-light);
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background-color var(--t-hover);
+}
+
+.row:hover {
+  background: var(--row-hover);
+}
+
+/* The checkbox is the real control, so the ring belongs on the whole row. */
+.row:focus-within {
+  box-shadow: var(--focus-ring);
+}
+
+.target {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--text);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.alreadyLinked {
+  font-size: 10.5px;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.empty {
+  font-size: 12.5px;
+  color: var(--text-faint);
+  padding: var(--space-3) 0;
+}
+
+.submit {
+  margin-top: 14px;
+}

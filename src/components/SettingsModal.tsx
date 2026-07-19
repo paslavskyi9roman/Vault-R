@@ -1,16 +1,10 @@
 import { useState } from 'react';
 import { useVaultStore } from '../store/useVaultStore';
-import {
-  overlayBackdropStyle,
-  modalStyle,
-  modalHeaderStyle,
-  modalTitleStyle,
-  modalSubStyle,
-  closeXStyle,
-  primaryBtnStyle,
-  secondaryBtnStyle,
-} from './overlayStyles';
+import { usePresence } from '../lib/usePresence';
+import { Spinner } from './Spinner';
+import { CloseIcon } from './icons';
 import { timeAgo } from '../lib/envColor';
+import styles from './SettingsModal.module.css';
 
 const AUTO_LOCK_CHOICES = [
   { minutes: 0, label: 'Off' },
@@ -26,25 +20,28 @@ export function SettingsModal() {
   const needsMigration = useVaultStore((s) => s.needsMigration);
   const recoveryCodeOnce = useVaultStore((s) => s.recoveryCodeOnce);
 
-  if (!settingsOpen) return null;
+  const { mounted, state } = usePresence(settingsOpen, 120);
+  if (!mounted) return null;
 
   return (
     <>
-      <div style={overlayBackdropStyle} onClick={closeSettings} />
-      <div style={{ ...modalStyle, width: '480px' }}>
-        <div style={modalHeaderStyle}>
-          <span style={modalTitleStyle}>Vault settings</span>
-          <button style={closeXStyle} onClick={closeSettings}>
-            &times;
-          </button>
-        </div>
-        <div style={modalSubStyle}>Security, backups and recovery for this device.</div>
+      <div className={`v-backdrop is-${state}`} onClick={closeSettings} />
+      <div className="v-modal-wrap">
+        <div className={`v-modal ${styles.dialog} is-${state}`}>
+          <div className="v-modal-header">
+            <span className="v-modal-title">Vault settings</span>
+            <button className="v-close-x" onClick={closeSettings} aria-label="Close">
+              <CloseIcon size={13} />
+            </button>
+          </div>
+          <div className="v-modal-sub">Security, backups and recovery for this device.</div>
 
-        {needsMigration && <MigrationNotice />}
-        {recoveryCodeOnce ? <RecoveryCodeReveal code={recoveryCodeOnce} /> : <RecoverySection />}
-        <AutoLockSection />
-        <BackupSection />
-        <PasswordSection />
+          {needsMigration && <MigrationNotice />}
+          {recoveryCodeOnce ? <RecoveryCodeReveal code={recoveryCodeOnce} /> : <RecoverySection />}
+          <AutoLockSection />
+          <BackupSection />
+          <PasswordSection />
+        </div>
       </div>
     </>
   );
@@ -52,7 +49,7 @@ export function SettingsModal() {
 
 function MigrationNotice() {
   return (
-    <div style={noticeStyle}>
+    <div className={styles.notice}>
       This vault still uses the original storage format. Lock it and unlock once with your master
       password to upgrade it — backups, password changes and recovery kits become available after
       that.
@@ -62,8 +59,8 @@ function MigrationNotice() {
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div style={sectionStyle}>
-      <div style={sectionTitleStyle}>{title}</div>
+    <div className={styles.section}>
+      <div className={styles.sectionTitle}>{title}</div>
       {children}
     </div>
   );
@@ -75,27 +72,20 @@ function AutoLockSection() {
 
   return (
     <Section title="Auto-lock">
-      <div style={sectionBodyStyle}>
+      <div className={styles.sectionBody}>
         Lock the vault automatically after a period with no keyboard or mouse activity.
       </div>
-      <div style={choiceRowStyle}>
-        {AUTO_LOCK_CHOICES.map((choice) => {
-          const active = autoLockMinutes === choice.minutes;
-          return (
-            <button
-              key={choice.minutes}
-              style={{
-                ...choiceBtnStyle,
-                color: active ? 'var(--accent)' : 'var(--text-dim)',
-                borderColor: active ? 'var(--accent)' : 'var(--border)',
-                background: active ? 'var(--accent-dim)' : 'transparent',
-              }}
-              onClick={() => void setAutoLockMinutes(choice.minutes)}
-            >
-              {choice.label}
-            </button>
-          );
-        })}
+      <div className={styles.choiceRow}>
+        {AUTO_LOCK_CHOICES.map((choice) => (
+          <button
+            key={choice.minutes}
+            className={`v-btn ${styles.choiceBtn}`}
+            aria-pressed={autoLockMinutes === choice.minutes}
+            onClick={() => void setAutoLockMinutes(choice.minutes)}
+          >
+            {choice.label}
+          </button>
+        ))}
       </div>
     </Section>
   );
@@ -108,21 +98,25 @@ function BackupSection() {
 
   return (
     <Section title="Backups">
-      <div style={sectionBodyStyle}>
+      <div className={styles.sectionBody}>
         A backup is a copy of your vault file and stays encrypted — it can only be opened with the
         master password it had when the copy was taken. Vault-R also keeps the last 10 copies
         automatically, on every unlock and before anything destructive.
       </div>
-      <div style={sectionBodyStyle}>
+      <div className={styles.sectionBody}>
         {backups.length > 0 ? (
-          <span style={mutedMonoStyle}>
+          <span className={styles.mutedMono}>
             Last automatic backup {timeAgo(backups[0].createdAt)} · {backups.length} kept
           </span>
         ) : (
-          <span style={mutedMonoStyle}>No automatic backups yet.</span>
+          <span className={styles.mutedMono}>No automatic backups yet.</span>
         )}
       </div>
-      <button style={secondaryBtnStyle} onClick={() => void exportBackup()} disabled={needsMigration}>
+      <button
+        className={`v-btn ${styles.selfStart}`}
+        onClick={() => void exportBackup()}
+        disabled={needsMigration}
+      >
         Export encrypted backup…
       </button>
     </Section>
@@ -136,13 +130,13 @@ function RecoverySection() {
 
   return (
     <Section title="Recovery kit">
-      <div style={sectionBodyStyle}>
+      <div className={styles.sectionBody}>
         {hasRecoveryCode
           ? 'This vault has a recovery kit. The code was shown once when you created it — if you no longer have it, generate a new one.'
           : 'Without a recovery kit, forgetting your master password means losing every secret in this vault. A recovery code unlocks it if that happens.'}
       </div>
       <button
-        style={secondaryBtnStyle}
+        className={`v-btn ${styles.selfStart}`}
         onClick={() => void generateRecoveryCode()}
         disabled={needsMigration}
       >
@@ -161,20 +155,20 @@ function RecoveryCodeReveal({ code }: { code: string }) {
 
   return (
     <Section title="Your recovery code">
-      <div style={sectionBodyStyle}>
+      <div className={styles.sectionBody}>
         Write this down or save it somewhere safe and offline.{' '}
-        <strong style={{ color: 'var(--text)' }}>It will not be shown again.</strong> Anyone holding
-        it can read every secret in this vault.
+        <strong className={styles.strong}>It will not be shown again.</strong> Anyone holding it can
+        read every secret in this vault.
       </div>
-      <div style={codeBoxStyle}>{code}</div>
-      <div style={buttonRowStyle}>
-        <button style={secondaryBtnStyle} onClick={() => void copyPlainText(code, 'Recovery code')}>
+      <div className={styles.codeBox}>{code}</div>
+      <div className={styles.buttonRow}>
+        <button className="v-btn" onClick={() => void copyPlainText(code, 'Recovery code')}>
           Copy
         </button>
-        <button style={secondaryBtnStyle} onClick={() => void saveRecoveryCodeToFile()}>
+        <button className="v-btn" onClick={() => void saveRecoveryCodeToFile()}>
           Save as file…
         </button>
-        <button style={{ ...primaryBtnStyle, width: 'auto' }} onClick={dismissRecoveryCode}>
+        <button className="v-btn v-btn--primary" onClick={dismissRecoveryCode}>
           I&rsquo;ve saved it
         </button>
       </div>
@@ -195,12 +189,12 @@ function PasswordSection() {
 
   return (
     <Section title="Master password">
-      <div style={sectionBodyStyle}>
+      <div className={styles.sectionBody}>
         Changing this re-locks the vault file with a new password. Your secrets are not re-encrypted
         and any recovery kit stays valid.
       </div>
       <input
-        style={inputStyle}
+        className={`v-input ${styles.pwInput}`}
         type="password"
         placeholder="Current password"
         value={pwCurrent}
@@ -208,7 +202,7 @@ function PasswordSection() {
         disabled={needsMigration}
       />
       <input
-        style={inputStyle}
+        className={`v-input ${styles.pwInput}`}
         type="password"
         placeholder="New password"
         value={pwNew}
@@ -216,102 +210,32 @@ function PasswordSection() {
         disabled={needsMigration}
       />
       <input
-        style={inputStyle}
+        className={`v-input ${styles.pwInput}`}
         type="password"
         placeholder="Confirm new password"
         value={pwConfirm}
         onChange={(e) => setPwField('pwConfirm', e.target.value)}
         disabled={needsMigration}
       />
-      <label style={checkboxRowStyle}>
-        <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
+      <label className={styles.checkboxRow}>
+        <input
+          className="v-check"
+          type="checkbox"
+          checked={remember}
+          onChange={(e) => setRemember(e.target.checked)}
+        />
         <span>Remember on this device</span>
       </label>
-      {pwError && <div style={errorStyle}>{pwError}</div>}
+      {pwError && <div className={styles.error}>{pwError}</div>}
       <button
-        style={{ ...primaryBtnStyle, opacity: pwBusy || needsMigration ? 0.5 : 1 }}
+        className={`v-btn v-btn--primary ${styles.selfStart}`}
         onClick={() => void changePassword(remember)}
         disabled={pwBusy || needsMigration}
+        data-pending={pwBusy}
       >
-        {pwBusy ? 'Changing…' : 'Change master password'}
+        Change master password
+        {pwBusy && <Spinner size={13} />}
       </button>
     </Section>
   );
 }
-
-const sectionStyle: React.CSSProperties = {
-  borderTop: '1px solid var(--border-light)',
-  paddingTop: '14px',
-  marginTop: '14px',
-  display: 'flex',
-  flexDirection: 'column',
-  gap: '9px',
-};
-const sectionTitleStyle: React.CSSProperties = {
-  fontSize: '11px',
-  fontWeight: 700,
-  letterSpacing: '0.7px',
-  color: 'var(--text-faint)',
-  textTransform: 'uppercase',
-};
-const sectionBodyStyle: React.CSSProperties = {
-  fontSize: '12.5px',
-  color: 'var(--text-dim)',
-  lineHeight: 1.6,
-};
-const mutedMonoStyle: React.CSSProperties = {
-  fontFamily: 'var(--font-mono)',
-  fontSize: '11.5px',
-  color: 'var(--text-faint)',
-};
-const noticeStyle: React.CSSProperties = {
-  fontSize: '12.5px',
-  color: 'var(--text-dim)',
-  lineHeight: 1.6,
-  background: 'var(--panel-2)',
-  border: '1px solid var(--env-staging)',
-  borderRadius: '6px',
-  padding: '10px 12px',
-};
-const choiceRowStyle: React.CSSProperties = { display: 'flex', gap: '6px', flexWrap: 'wrap' };
-const choiceBtnStyle: React.CSSProperties = {
-  fontSize: '12px',
-  fontWeight: 600,
-  border: '1px solid',
-  borderRadius: '6px',
-  padding: '6px 12px',
-  cursor: 'pointer',
-};
-const inputStyle: React.CSSProperties = {
-  width: '100%',
-  boxSizing: 'border-box',
-  fontSize: '13px',
-  background: 'var(--panel-2)',
-  border: '1px solid var(--border)',
-  borderRadius: '6px',
-  color: 'var(--text)',
-  padding: '9px 11px',
-  outline: 'none',
-};
-const checkboxRowStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: '8px',
-  fontSize: '12.5px',
-  color: 'var(--text-dim)',
-  cursor: 'pointer',
-};
-const errorStyle: React.CSSProperties = { fontSize: '12px', color: 'var(--danger)', lineHeight: 1.5 };
-const codeBoxStyle: React.CSSProperties = {
-  fontFamily: 'var(--font-mono)',
-  fontSize: '15px',
-  letterSpacing: '1px',
-  color: 'var(--accent)',
-  background: 'var(--cli-bg)',
-  border: '1px solid var(--border)',
-  borderRadius: '6px',
-  padding: '14px 12px',
-  textAlign: 'center',
-  wordBreak: 'break-all',
-};
-const buttonRowStyle: React.CSSProperties = { display: 'flex', gap: '8px', flexWrap: 'wrap' };

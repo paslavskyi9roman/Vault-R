@@ -1,76 +1,18 @@
 import { useState, type FormEvent, type ReactNode } from 'react';
 import { useVaultStore } from '../store/useVaultStore';
 import type { VaultStatus } from '../lib/api';
-
-const iconProps = {
-  viewBox: '0 0 24 24',
-  fill: 'none',
-  stroke: 'currentColor',
-  strokeWidth: 1.75,
-  strokeLinecap: 'round' as const,
-  strokeLinejoin: 'round' as const,
-  'aria-hidden': true,
-};
-
-const LockIcon = () => (
-  <svg {...iconProps}>
-    <rect x="4" y="10.5" width="16" height="10" rx="2" />
-    <path d="M8 10.5V7a4 4 0 0 1 8 0v3.5" />
-  </svg>
-);
-
-const AlertIcon = () => (
-  <svg {...iconProps}>
-    <path d="M12 4.5 2.8 20h18.4L12 4.5Z" />
-    <path d="M12 10v4" />
-    <path d="M12 17.2h.01" />
-  </svg>
-);
-
-const KeyIcon = () => (
-  <svg {...iconProps}>
-    <circle cx="8" cy="15" r="4" />
-    <path d="M11 12.5 20 3.5" />
-    <path d="M17.5 6l2.5 2.5" />
-  </svg>
-);
-
-const ArchiveIcon = () => (
-  <svg {...iconProps}>
-    <rect x="3" y="4.5" width="18" height="4.5" rx="1.5" />
-    <path d="M5 9v9a1.5 1.5 0 0 0 1.5 1.5h11A1.5 1.5 0 0 0 19 18V9" />
-    <path d="M10 13h4" />
-  </svg>
-);
-
-const PasswordIcon = () => (
-  <svg {...iconProps}>
-    <rect x="3" y="7" width="18" height="10" rx="2.5" />
-    <path d="M7.5 12h.01M12 12h.01M16.5 12h.01" />
-  </svg>
-);
-
-const RetryIcon = () => (
-  <svg {...iconProps}>
-    <path d="M20 12a8 8 0 1 1-2.6-5.9" />
-    <path d="M20 4v4.5h-4.5" />
-  </svg>
-);
-
-const EyeIcon = () => (
-  <svg {...iconProps}>
-    <path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z" />
-    <circle cx="12" cy="12" r="2.75" />
-  </svg>
-);
-
-const EyeOffIcon = () => (
-  <svg {...iconProps}>
-    <path d="M10.7 6.2A8.9 8.9 0 0 1 12 6c6 0 9.5 6 9.5 6a16 16 0 0 1-3.2 3.8" />
-    <path d="M6.3 8.1A16 16 0 0 0 2.5 12S6 18 12 18a8.8 8.8 0 0 0 3.5-.7" />
-    <path d="M4 4l16 16" />
-  </svg>
-);
+import { Spinner } from './Spinner';
+import {
+  LockIcon,
+  WarningIcon,
+  KeyIcon,
+  ArchiveIcon,
+  PasswordIcon,
+  RestoreIcon,
+  EyeIcon,
+  EyeOffIcon,
+} from './icons';
+import styles from './UnlockScreen.module.css';
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -88,7 +30,7 @@ function formatWhen(ms: number | null): string {
 
 function ManifestRow({ term, children }: { term: string; children: ReactNode }) {
   return (
-    <div className="auth-row">
+    <div className={`${styles.row} v-enter`}>
       <dt>{term}</dt>
       <dd>{children}</dd>
     </div>
@@ -102,16 +44,16 @@ function Manifest({ status }: { status: VaultStatus | null }) {
   const found = status.exists;
 
   return (
-    <div className="auth-manifest">
-      <div className="auth-manifest-head">
-        <span className="auth-manifest-label">Manifest</span>
-        <span className={`auth-state ${found ? 'is-sealed' : 'is-missing'}`}>
-          {found ? <LockIcon /> : <AlertIcon />}
+    <div className={styles.manifest}>
+      <div className={`${styles.manifestHead} v-enter`}>
+        <span className={styles.manifestLabel}>Manifest</span>
+        <span className={styles.state} data-found={found}>
+          {found ? <LockIcon size={11} /> : <WarningIcon size={11} />}
           {found ? 'Sealed' : 'No vault file'}
         </span>
       </div>
 
-      <dl className="auth-rows">
+      <dl className={styles.rows}>
         <ManifestRow term="location">{status.dir}</ManifestRow>
 
         <ManifestRow term="file">
@@ -120,7 +62,7 @@ function Manifest({ status }: { status: VaultStatus | null }) {
               <strong>{status.fileName}</strong> · {formatBytes(status.bytes)}
             </>
           ) : (
-            <span className="auth-warn">{status.fileName} is not in this folder</span>
+            <span className={styles.warn}>{status.fileName} is not in this folder</span>
           )}
         </ManifestRow>
 
@@ -132,7 +74,7 @@ function Manifest({ status }: { status: VaultStatus | null }) {
               </>
             ) : (
               <>
-                <strong>v1</strong> · <span className="auth-warn">legacy</span>, upgrades on your
+                <strong>v1</strong> · <span className={styles.warn}>legacy</span>, upgrades on your
                 next password unlock
               </>
             )}
@@ -147,7 +89,7 @@ function Manifest({ status }: { status: VaultStatus | null }) {
               <strong>{status.backupCount}</strong> on this device
             </>
           ) : (
-            <span className="auth-warn">
+            <span className={styles.warn}>
               none yet{status.format === 1 ? ' — v1 vaults are not backed up' : ''}
             </span>
           )}
@@ -159,14 +101,14 @@ function Manifest({ status }: { status: VaultStatus | null }) {
 
 function AuthLayout({ tagline, aside, children }: { tagline: string; aside?: ReactNode; children: ReactNode }) {
   return (
-    <div className="auth-root">
-      <div className="auth-shell">
-        <div className="auth-brand">
-          <span className="auth-eyebrow">Local secrets vault</span>
-          <span className="auth-wordmark">
+    <div className={styles.root}>
+      <div className={styles.shell}>
+        <div className={styles.brand}>
+          <span className={styles.eyebrow}>Local secrets vault</span>
+          <span className={styles.wordmark}>
             VAULT<em>·R</em>
           </span>
-          <p className="auth-tagline">{tagline}</p>
+          <p className={styles.tagline}>{tagline}</p>
           {aside}
         </div>
         {children}
@@ -188,9 +130,9 @@ function PasswordField({
 }) {
   const [shown, setShown] = useState(false);
   return (
-    <div className="auth-field">
+    <div className={styles.field}>
       <input
-        className="auth-input has-toggle"
+        className={`${styles.input} ${styles.inputToggle}`}
         type={shown ? 'text' : 'password'}
         placeholder={placeholder}
         value={value}
@@ -198,13 +140,13 @@ function PasswordField({
         autoFocus={autoFocus}
       />
       <button
-        className="auth-reveal"
+        className={styles.reveal}
         type="button"
         onClick={() => setShown((s) => !s)}
         aria-label={shown ? 'Hide password' : 'Show password'}
         title={shown ? 'Hide password' : 'Show password'}
       >
-        {shown ? <EyeOffIcon /> : <EyeIcon />}
+        {shown ? <EyeOffIcon size={15} /> : <EyeIcon size={15} />}
       </button>
     </div>
   );
@@ -212,8 +154,8 @@ function PasswordField({
 
 function ErrorNote({ children }: { children: ReactNode }) {
   return (
-    <div className="auth-error" role="alert">
-      <AlertIcon />
+    <div className={styles.error} role="alert">
+      <WarningIcon size={14} className={styles.errorIcon} />
       <span>{children}</span>
     </div>
   );
@@ -221,7 +163,7 @@ function ErrorNote({ children }: { children: ReactNode }) {
 
 function Route({ icon, label, onClick }: { icon: ReactNode; label: string; onClick: () => void }) {
   return (
-    <button className="auth-route" type="button" onClick={onClick}>
+    <button className={styles.route} type="button" onClick={onClick}>
       <span>{label}</span>
       {icon}
     </button>
@@ -241,15 +183,22 @@ export function StartupErrorScreen() {
       tagline="Your secrets stay encrypted on this device until you unlock them."
       aside={<Manifest status={vaultStatus} />}
     >
-      <div className="auth-card">
-        <div className="auth-title">Can&rsquo;t read the vault folder</div>
-        <p className="auth-sub">
+      <div className={`${styles.card} v-enter`}>
+        <div className={styles.title}>Can&rsquo;t read the vault folder</div>
+        <p className={styles.sub}>
           The app could not check whether a vault is on this device, so it will not offer to make a
           new one — an existing vault stays where it is.
         </p>
         <ErrorNote>{initError}</ErrorNote>
-        <button className="auth-submit" type="button" onClick={() => void init()} disabled={checkingVault}>
-          {checkingVault ? 'Checking…' : 'Check again'}
+        <button
+          className={`v-btn v-btn--primary v-btn--block ${styles.submit}`}
+          type="button"
+          onClick={() => void init()}
+          disabled={checkingVault}
+          data-pending={checkingVault}
+        >
+          Check again
+          {checkingVault && <Spinner size={14} />}
         </button>
       </div>
     </AuthLayout>
@@ -308,15 +257,15 @@ export function UnlockScreen() {
         tagline="Your secrets stay encrypted on this device until you unlock them."
         aside={<Manifest status={vaultStatus} />}
       >
-        <form className="auth-card" onSubmit={handleSubmit}>
-          <div className="auth-title">Use your recovery code</div>
-          <p className="auth-sub">
+        <form className={`${styles.card} v-enter`} onSubmit={handleSubmit}>
+          <div className={styles.title}>Use your recovery code</div>
+          <p className={styles.sub}>
             Enter the code from your recovery kit. You&rsquo;ll set a new master password straight
             afterwards.
           </p>
-          <div className="auth-field">
+          <div className={styles.field}>
             <input
-              className="auth-input"
+              className={styles.input}
               placeholder="XXXXX-XXXXX-XXXXX-XXXXX-XXXXX"
               value={recoveryCode}
               onChange={(e) => setRecoveryCode(e.target.value)}
@@ -326,12 +275,18 @@ export function UnlockScreen() {
             />
           </div>
           {authError && <ErrorNote>{authError}</ErrorNote>}
-          <button className="auth-submit" type="submit" disabled={authBusy}>
-            {authBusy ? 'Unlocking…' : 'Unlock with recovery code'}
+          <button
+            className={`v-btn v-btn--primary v-btn--block ${styles.submit}`}
+            type="submit"
+            disabled={authBusy}
+            data-pending={authBusy}
+          >
+            Unlock with recovery code
+            {authBusy && <Spinner size={14} />}
           </button>
-          <div className="auth-routes">
+          <div className={styles.routes}>
             <Route
-              icon={<PasswordIcon />}
+              icon={<PasswordIcon size={13} className={styles.routeIcon} />}
               label="Back to master password"
               onClick={() => setRecoveryMode(false)}
             />
@@ -346,9 +301,9 @@ export function UnlockScreen() {
       tagline="Your secrets stay encrypted on this device until you unlock them."
       aside={<Manifest status={vaultStatus} />}
     >
-      <form className="auth-card" onSubmit={handleSubmit}>
-        <div className="auth-title">{isCreate ? 'Create your vault' : 'Unlock vault'}</div>
-        <p className="auth-sub">
+      <form className={`${styles.card} v-enter`} onSubmit={handleSubmit}>
+        <div className={styles.title}>{isCreate ? 'Create your vault' : 'Unlock vault'}</div>
+        <p className={styles.sub}>
           {isCreate
             ? 'Choose a master password. It is the only thing that decrypts this vault — make a recovery kit from settings straight afterwards.'
             : 'Enter your master password to unlock this vault.'}
@@ -357,7 +312,7 @@ export function UnlockScreen() {
         <PasswordField
           value={password}
           onChange={setPassword}
-          placeholder={isCreate ? 'Master password' : 'Master password'}
+          placeholder="Master password"
           autoFocus
         />
         {isCreate && (
@@ -368,8 +323,9 @@ export function UnlockScreen() {
           />
         )}
 
-        <label className="auth-remember">
+        <label className={styles.remember}>
           <input
+            className="v-check"
             type="checkbox"
             checked={remember}
             onChange={(e) => setRemember(e.target.checked)}
@@ -379,35 +335,41 @@ export function UnlockScreen() {
 
         {error && <ErrorNote>{error}</ErrorNote>}
 
-        <button className="auth-submit" type="submit" disabled={authBusy}>
-          {authBusy ? 'Working…' : isCreate ? 'Create vault' : 'Unlock'}
+        <button
+          className={`v-btn v-btn--primary v-btn--block ${styles.submit}`}
+          type="submit"
+          disabled={authBusy}
+          data-pending={authBusy}
+        >
+          {isCreate ? 'Create vault' : 'Unlock'}
+          {authBusy && <Spinner size={14} />}
         </button>
 
-        <div className="auth-routes">
-          <span className="auth-routes-label">
-            {isCreate ? 'Already have a vault?' : 'Can’t get in?'}
+        <div className={styles.routes}>
+          <span className={styles.routesLabel}>
+            {isCreate ? 'Already have a vault?' : "Can't get in?"}
           </span>
 
           {isCreate && (
             <Route
-              icon={<PasswordIcon />}
+              icon={<PasswordIcon size={13} className={styles.routeIcon} />}
               label="Unlock an existing vault instead"
               onClick={() => setForceExisting(true)}
             />
           )}
           <Route
-            icon={<KeyIcon />}
+            icon={<KeyIcon size={13} className={styles.routeIcon} />}
             label="Use a recovery code"
             onClick={() => setRecoveryMode(true)}
           />
           <Route
-            icon={<ArchiveIcon />}
+            icon={<ArchiveIcon size={13} className={styles.routeIcon} />}
             label="Restore from a backup file"
             onClick={() => void restoreBackupFromUnlock()}
           />
           {!isCreate && !vaultExists && (
             <Route
-              icon={<RetryIcon />}
+              icon={<RestoreIcon size={13} className={styles.routeIcon} />}
               label="Back to setting up a new vault"
               onClick={() => setForceExisting(false)}
             />
@@ -443,14 +405,12 @@ export function ResetPasswordScreen() {
     void resetPasswordAfterRecovery(password);
   }
 
-  const error = localError ?? authError;
-
   return (
-    <AuthLayout tagline="Your vault is open. Give it a new master password to lock it with — your recovery code keeps working.">
-      <form className="auth-card" onSubmit={handleSubmit}>
-        <div className="auth-title">Set a new master password</div>
-        <p className="auth-sub">
-          This replaces the password you could not recall. Nothing else about the vault changes.
+    <AuthLayout tagline="Your vault is open. Choose the password it locks with from now on.">
+      <form className={`${styles.card} v-enter`} onSubmit={handleSubmit}>
+        <div className={styles.title}>Set a new master password</div>
+        <p className={styles.sub}>
+          Your recovery code keeps working, so store it somewhere safe alongside this password.
         </p>
         <PasswordField
           value={password}
@@ -463,9 +423,15 @@ export function ResetPasswordScreen() {
           onChange={setConfirm}
           placeholder="Confirm new master password"
         />
-        {error && <ErrorNote>{error}</ErrorNote>}
-        <button className="auth-submit" type="submit" disabled={authBusy}>
-          {authBusy ? 'Saving…' : 'Set master password'}
+        {(localError || authError) && <ErrorNote>{localError ?? authError}</ErrorNote>}
+        <button
+          className={`v-btn v-btn--primary v-btn--block ${styles.submit}`}
+          type="submit"
+          disabled={authBusy}
+          data-pending={authBusy}
+        >
+          Set master password
+          {authBusy && <Spinner size={14} />}
         </button>
       </form>
     </AuthLayout>

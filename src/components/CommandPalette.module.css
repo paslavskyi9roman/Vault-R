@@ -1,0 +1,98 @@
+/* Sits high rather than centred, so it gets its own shell instead of
+   .v-modal — but the same enter/exit vocabulary. */
+.palette {
+  position: fixed;
+  top: 18%;
+  left: 50%;
+  width: 520px;
+  max-width: 90vw;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--edge-top), var(--elev-2);
+  z-index: var(--z-overlay-content);
+  padding: 10px;
+  opacity: 0;
+  transform: translateX(-50%) translateY(-6px) scale(0.98);
+  transition:
+    opacity var(--t-enter),
+    transform var(--t-enter);
+  will-change: transform, opacity;
+}
+
+.palette.isEntered {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0) scale(1);
+}
+
+.palette.isExiting {
+  opacity: 0;
+  transform: translateX(-50%) translateY(-4px) scale(0.99);
+  transition:
+    opacity var(--t-exit),
+    transform var(--t-exit);
+}
+
+.input {
+  font-size: 14px;
+  border-radius: 7px;
+  padding: 10px var(--space-4);
+  margin-bottom: var(--space-2);
+}
+
+.results {
+  display: flex;
+  flex-direction: column;
+}
+
+.resultRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  width: 100%;
+  padding: 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  transition: background-color var(--t-hover);
+}
+
+.resultRow:hover {
+  background: var(--panel-2);
+}
+
+.resultRow:focus-visible {
+  outline: none;
+  background: var(--panel-2);
+  box-shadow: var(--focus-ring);
+}
+
+.resultLabel {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.resultSub {
+  font-size: 11.5px;
+  color: var(--text-faint);
+  flex-shrink: 0;
+  transition: color var(--t-hover);
+}
+
+.resultRow:hover .resultSub,
+.resultRow:focus-visible .resultSub {
+  color: var(--text-dim);
+}
+
+.empty {
+  padding: 10px;
+  font-size: 12.5px;
+  color: var(--text-faint);
+}

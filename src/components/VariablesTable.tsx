@@ -1,10 +1,15 @@
 import { useEffect, useState, type KeyboardEvent } from 'react';
 import { useVaultStore } from '../store/useVaultStore';
+import { Skeleton } from './Skeleton';
+import { GearIcon, WarningIcon, ChevronIcon, CloseIcon, LinkIcon } from './icons';
+import { Select } from './Select';
 import type { VariableWithUsage } from '../lib/api';
+import styles from './VariablesTable.module.css';
 
 export function VariablesTable() {
   const activeEnvId = useVaultStore((s) => s.activeEnvId);
   const variables = useVaultStore((s) => s.variables);
+  const varsLoading = useVaultStore((s) => s.varsLoading);
   const varSearch = useVaultStore((s) => s.varSearch);
   const setVarSearch = useVaultStore((s) => s.setVarSearch);
   const newVarKey = useVaultStore((s) => s.newVarKey);
@@ -26,9 +31,9 @@ export function VariablesTable() {
 
   return (
     <>
-      <div style={tableSearchRowStyle}>
+      <div className={styles.searchRow}>
         <input
-          style={tableSearchInputStyle}
+          className={`v-input ${styles.searchInput}`}
           placeholder="Filter variables in this environment&hellip;"
           value={varSearch}
           onChange={(e) => setVarSearch(e.target.value)}
@@ -37,60 +42,88 @@ export function VariablesTable() {
 
       {selectedCount > 0 && <SelectionActionBar count={selectedCount} />}
 
-      <div style={tableStyle}>
-        <div style={tableHeaderRowStyle}>
-          <div style={colCheckStyle} />
-          <div style={colKeyStyle}>KEY</div>
-          <div style={colValueStyle}>VALUE</div>
-          <div style={colLinkedStyle}>LINKED</div>
-          <div style={colActionsStyle}>&nbsp;</div>
+      <div className={styles.table}>
+        <div className={styles.headerRow}>
+          <div className={styles.colCheck} />
+          <div className={styles.colKey}>KEY</div>
+          <div className={styles.colValue}>VALUE</div>
+          <div className={styles.colLinked}>LINKED</div>
+          <div className={styles.colActions}>&nbsp;</div>
         </div>
 
-        {filtered.map((v) => (
-          <VariableRow key={v.id} variable={v} />
-        ))}
+        {varsLoading ? (
+          <LoadingRows />
+        ) : (
+          filtered.map((v) => <VariableRow key={v.id} variable={v} />)
+        )}
 
-        {activeEnvId && (
-          <div style={addRowStyle}>
-            <div style={colCheckStyle} />
-            <div style={colKeyStyle}>
+        {activeEnvId && !varsLoading && (
+          <div className={styles.addRow}>
+            <div className={styles.colCheck} />
+            <div className={styles.colKey}>
               <input
-                style={addKeyInputStyle}
+                className={styles.addKeyInput}
                 placeholder="NEW_KEY"
                 value={newVarKey}
                 onChange={(e) => setNewVarKey(e.target.value)}
                 onKeyDown={onAddKeyDown}
               />
             </div>
-            <div style={colValueStyle}>
+            <div className={styles.colValue}>
               <input
-                style={addValueInputStyle}
+                className={styles.addValueInput}
                 placeholder="value"
                 value={newVarValue}
                 onChange={(e) => setNewVarValue(e.target.value)}
                 onKeyDown={onAddKeyDown}
               />
             </div>
-            <div style={colLinkedStyle} />
-            <div style={colActionsStyle}>
+            <div className={styles.colLinked} />
+            <div className={styles.colActions}>
               <button
-                style={rowIconBtnStyle}
+                className={`v-btn ${styles.rowBtn} ${styles.rowIconBtn}`}
                 title="Generate a value"
+                aria-label="Generate a value"
                 onClick={() => openGenerator({ type: 'add' })}
               >
-                &#9881;
+                <GearIcon size={12} />
               </button>
-              <button style={addVarBtnStyle} onClick={() => void addVariable()}>
+              <button className={`v-btn ${styles.addBtn}`} onClick={() => void addVariable()}>
                 add
               </button>
             </div>
           </div>
         )}
 
-        {activeEnvId && filtered.length === 0 && variables.length === 0 && (
-          <div style={emptyRowStyle}>No variables yet — add one above or use Import.</div>
+        {activeEnvId && !varsLoading && filtered.length === 0 && variables.length === 0 && (
+          <div className={styles.emptyRow}>No variables yet — add one above or use Import.</div>
+        )}
+
+        {activeEnvId && !varsLoading && filtered.length === 0 && variables.length > 0 && (
+          <div className={styles.emptyRow}>No variables match "{varSearch.trim()}".</div>
         )}
       </div>
+    </>
+  );
+}
+
+/// Mirrors the real row geometry so nothing shifts when the values land.
+function LoadingRows() {
+  return (
+    <>
+      {[0, 1, 2, 3].map((i) => (
+        <div key={i} className={styles.skelRow}>
+          <div className={styles.colCheck} />
+          <div className={styles.colKey}>
+            <Skeleton height={12} width={`${72 - i * 9}%`} />
+          </div>
+          <div className={styles.colValue}>
+            <Skeleton height={12} width={`${58 + i * 7}%`} />
+          </div>
+          <div className={styles.colLinked} />
+          <div className={styles.colActions} />
+        </div>
+      ))}
     </>
   );
 }
@@ -113,39 +146,37 @@ function SelectionActionBar({ count }: { count: number }) {
   );
 
   return (
-    <div style={selectionBarStyle}>
-      <span style={selectionCountStyle}>
-        {count} selected
-      </span>
-      <button style={selectionBtnStyle} onClick={() => void bulkCopySelectedAsEnvBlock()}>
+    <div className={`${styles.selectionBar} v-enter`}>
+      <span className={styles.selectionCount}>{count} selected</span>
+      <button
+        className={`v-btn ${styles.selectionBtn}`}
+        onClick={() => void bulkCopySelectedAsEnvBlock()}
+      >
         Copy as .env
       </button>
-      <select
-        style={selectionSelectStyle}
-        value={bulkMoveTargetId ?? ''}
-        onChange={(e) => setBulkMoveTarget(e.target.value)}
-      >
-        <option value="" disabled>
-          Move to&hellip;
-        </option>
-        {envOptions.map((o) => (
-          <option key={o.id} value={o.id}>
-            {o.label}
-          </option>
-        ))}
-      </select>
+      <Select
+        className={styles.selectionSelect}
+        value={bulkMoveTargetId}
+        options={envOptions.map((o) => ({ value: o.id, label: o.label }))}
+        placeholder="Move to…"
+        ariaLabel="Move selected variables to"
+        onChange={setBulkMoveTarget}
+      />
       <button
-        style={selectionBtnStyle}
+        className={`v-btn ${styles.selectionBtn}`}
         disabled={!bulkMoveTargetId}
         onClick={() => void bulkMoveSelected()}
       >
         Move
       </button>
-      <button style={selectionBtnDangerStyle} onClick={() => void bulkDeleteSelected()}>
+      <button
+        className={`v-btn v-btn--danger ${styles.selectionBtn} ${styles.selectionBtnDanger}`}
+        onClick={() => void bulkDeleteSelected()}
+      >
         Delete
       </button>
-      <button style={selectionClearBtnStyle} onClick={clearVarSelection}>
-        Clear
+      <button className={styles.selectionClear} onClick={clearVarSelection} aria-label="Clear selection">
+        <CloseIcon size={13} />
       </button>
     </div>
   );
@@ -186,18 +217,20 @@ function VariableRow({ variable }: { variable: VariableWithUsage }) {
 
   return (
     <>
-      <div style={tableRowStyle}>
-        <div style={colCheckStyle}>
+      <div className={styles.row} data-selected={selected}>
+        <div className={styles.colCheck}>
           <input
+            className="v-check"
             type="checkbox"
             checked={selected}
             onChange={() => toggleVarSelected(variable.id)}
+            aria-label={`Select ${variable.key}`}
           />
         </div>
-        <div style={colKeyStyle}>
+        <div className={styles.colKey}>
           {editingKey ? (
             <input
-              style={keyInputStyle}
+              className={styles.keyInput}
               value={keyDraft}
               onChange={(e) => setKeyDraft(e.target.value)}
               onBlur={commitKey}
@@ -213,21 +246,22 @@ function VariableRow({ variable }: { variable: VariableWithUsage }) {
               autoComplete="off"
             />
           ) : (
-            <span style={keyRowStyle}>
-              <span style={keyTextStyle} title="Click to rename" onClick={() => setEditingKey(true)}>
+            <span className={styles.keyRow}>
+              <button className={styles.keyText} title="Click to rename" onClick={() => setEditingKey(true)}>
                 {variable.key}
-              </span>
+              </button>
               {missingRequired && (
-                <span style={requiredBadgeStyle} title="Required but empty">
-                  &#9888;
+                <span className={styles.requiredBadge} title="Required but empty" role="img" aria-label="Required but empty">
+                  <WarningIcon size={12} />
                 </span>
               )}
             </span>
           )}
         </div>
-        <div style={colValueStyle}>
+        <div className={styles.colValue}>
           <input
-            style={valueInputStyle}
+            className={styles.valueInput}
+            data-revealed={revealed}
             type={revealed ? 'text' : 'password'}
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
@@ -236,42 +270,56 @@ function VariableRow({ variable }: { variable: VariableWithUsage }) {
               if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
             }}
             spellCheck={false}
+            aria-label={`Value of ${variable.key}`}
           />
         </div>
-        <div style={colLinkedStyle}>
+        <div className={styles.colLinked}>
           {variable.groupId && (
-            <span style={linkedPillStyle} onClick={() => openGroupPopover(variable.groupId!)}>
-              &#9101; linked &times;{variable.groupUsage}
-            </span>
+            <button className={styles.linkedPill} onClick={() => openGroupPopover(variable.groupId!)}>
+              <LinkIcon size={11} />
+              linked &times;{variable.groupUsage}
+            </button>
           )}
         </div>
-        <div style={colActionsStyle}>
-          <button style={rowIconBtnStyle} onClick={() => toggleReveal(variable.id)}>
+        <div className={`${styles.colActions} ${styles.rowActions}`}>
+          <button className={`v-btn ${styles.rowBtn}`} onClick={() => toggleReveal(variable.id)}>
             {revealed ? 'hide' : 'show'}
           </button>
-          <button style={rowIconBtnStyle} onClick={() => void copyVariable(variable.value, variable.key)}>
+          <button
+            className={`v-btn ${styles.rowBtn}`}
+            onClick={() => void copyVariable(variable.value, variable.key)}
+          >
             copy
           </button>
           <button
-            style={rowIconBtnStyle}
+            className={`v-btn ${styles.rowBtn} ${styles.rowIconBtn}`}
             title="Generate a new value"
+            aria-label={`Generate a new value for ${variable.key}`}
             onClick={() => openGenerator({ type: 'row', varId: variable.id })}
           >
-            &#9881;
+            <GearIcon size={12} />
           </button>
           {!variable.groupId && (
-            <button style={rowIconBtnStyle} onClick={() => void openLinkModal(variable.id, variable.key)}>
+            <button
+              className={`v-btn ${styles.rowBtn}`}
+              onClick={() => void openLinkModal(variable.id, variable.key)}
+            >
               link
             </button>
           )}
           <button
-            style={rowIconBtnStyle}
+            className={`v-btn ${styles.rowBtn} ${styles.rowIconBtn} ${styles.expandBtn}`}
             title="Description and required flag"
+            aria-label={`Details for ${variable.key}`}
+            aria-expanded={expanded}
             onClick={() => toggleVarExpand(variable.id)}
           >
-            {expanded ? '▲' : '…'}
+            <ChevronIcon size={12} />
           </button>
-          <button style={rowIconBtnDangerStyle} onClick={() => void deleteVariable(variable.id, variable.key)}>
+          <button
+            className={`v-btn v-btn--danger ${styles.rowBtn}`}
+            onClick={() => void deleteVariable(variable.id, variable.key)}
+          >
             del
           </button>
         </div>
@@ -312,17 +360,18 @@ function VariableDetail({ variable }: { variable: VariableWithUsage }) {
   }
 
   return (
-    <div style={detailRowStyle}>
+    <div className={`${styles.detailRow} v-enter`}>
       <textarea
-        style={detailTextareaStyle}
+        className={`v-input ${styles.detailTextarea}`}
         placeholder="What is this for? (e.g. get this from the Stripe dashboard)"
         value={description}
         onChange={(e) => setDescription(e.target.value)}
         onBlur={() => commit(description, required, rotateAfter)}
         rows={2}
       />
-      <label style={detailRequiredLabelStyle}>
+      <label className={styles.detailLabel}>
         <input
+          className="v-check"
           type="checkbox"
           checked={required}
           onChange={(e) => {
@@ -332,10 +381,10 @@ function VariableDetail({ variable }: { variable: VariableWithUsage }) {
         />
         Required (gates <code>vault check</code>)
       </label>
-      <label style={detailRequiredLabelStyle}>
+      <label className={styles.detailLabel}>
         Rotate every
         <input
-          style={detailRotationInputStyle}
+          className={`v-input ${styles.detailRotationInput}`}
           type="number"
           min={1}
           placeholder="—"
@@ -348,266 +397,3 @@ function VariableDetail({ variable }: { variable: VariableWithUsage }) {
     </div>
   );
 }
-
-const tableSearchRowStyle: React.CSSProperties = { marginBottom: '10px' };
-const tableSearchInputStyle: React.CSSProperties = {
-  width: '100%',
-  maxWidth: '360px',
-  fontSize: '13px',
-  background: 'var(--panel-2)',
-  border: '1px solid var(--border)',
-  borderRadius: '6px',
-  color: 'var(--text)',
-  padding: '8px 12px',
-  outline: 'none',
-  boxSizing: 'border-box',
-};
-
-const tableStyle: React.CSSProperties = { border: '1px solid var(--border)', borderRadius: '8px', overflow: 'hidden' };
-const tableHeaderRowStyle: React.CSSProperties = {
-  display: 'flex',
-  background: 'var(--panel-2)',
-  padding: '9px 14px',
-  borderBottom: '1px solid var(--border)',
-};
-const tableRowStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  padding: '10px 14px',
-  borderBottom: '1px solid var(--border-light)',
-};
-const addRowStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  padding: '10px 14px',
-  borderTop: '1px dashed var(--border)',
-  background: 'rgba(255,255,255,0.015)',
-};
-const emptyRowStyle: React.CSSProperties = {
-  padding: '18px 14px',
-  fontSize: '12.5px',
-  color: 'var(--text-faint)',
-  textAlign: 'center',
-};
-const colCheckStyle: React.CSSProperties = {
-  width: '24px',
-  flexShrink: 0,
-  display: 'flex',
-  alignItems: 'center',
-  boxSizing: 'border-box',
-};
-const colKeyStyle: React.CSSProperties = {
-  width: '24%',
-  fontSize: '10.5px',
-  fontWeight: 700,
-  color: 'var(--text-faint)',
-  letterSpacing: '0.5px',
-  paddingRight: '10px',
-  boxSizing: 'border-box',
-};
-const colValueStyle: React.CSSProperties = {
-  width: '42%',
-  fontSize: '10.5px',
-  fontWeight: 700,
-  color: 'var(--text-faint)',
-  letterSpacing: '0.5px',
-  paddingRight: '10px',
-  boxSizing: 'border-box',
-};
-const colLinkedStyle: React.CSSProperties = {
-  width: '16%',
-  fontSize: '10.5px',
-  fontWeight: 700,
-  color: 'var(--text-faint)',
-  letterSpacing: '0.5px',
-  boxSizing: 'border-box',
-};
-const colActionsStyle: React.CSSProperties = {
-  width: '16%',
-  display: 'flex',
-  gap: '6px',
-  justifyContent: 'flex-end',
-  boxSizing: 'border-box',
-};
-const keyRowStyle: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: '6px' };
-const keyTextStyle: React.CSSProperties = {
-  fontFamily: 'var(--font-mono)',
-  fontSize: '13px',
-  color: 'var(--key)',
-  fontWeight: 600,
-  cursor: 'text',
-};
-const requiredBadgeStyle: React.CSSProperties = {
-  color: 'var(--danger)',
-  fontSize: '12px',
-  cursor: 'default',
-};
-const detailRowStyle: React.CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  gap: '8px',
-  padding: '10px 14px 14px',
-  borderBottom: '1px solid var(--border-light)',
-  background: 'rgba(255,255,255,0.015)',
-};
-const detailTextareaStyle: React.CSSProperties = {
-  width: '100%',
-  fontFamily: 'var(--font-mono)',
-  fontSize: '12.5px',
-  background: 'var(--panel-2)',
-  border: '1px solid var(--border)',
-  borderRadius: '6px',
-  color: 'var(--text)',
-  padding: '8px 10px',
-  outline: 'none',
-  boxSizing: 'border-box',
-  resize: 'vertical',
-};
-const detailRequiredLabelStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: '6px',
-  fontSize: '12px',
-  color: 'var(--text-dim)',
-};
-const detailRotationInputStyle: React.CSSProperties = {
-  width: '58px',
-  fontFamily: 'var(--font-mono)',
-  fontSize: '12px',
-  background: 'var(--panel-2)',
-  border: '1px solid var(--border)',
-  borderRadius: '5px',
-  color: 'var(--text)',
-  padding: '3px 6px',
-  outline: 'none',
-};
-const keyInputStyle: React.CSSProperties = {
-  width: '100%',
-  fontFamily: 'var(--font-mono)',
-  fontSize: '13px',
-  color: 'var(--key)',
-  fontWeight: 600,
-  background: 'var(--panel-2)',
-  border: '1px solid var(--border)',
-  borderRadius: '4px',
-  outline: 'none',
-  padding: '2px 5px',
-  boxSizing: 'border-box',
-};
-const valueInputStyle: React.CSSProperties = {
-  width: '100%',
-  fontFamily: 'var(--font-mono)',
-  fontSize: '13px',
-  color: 'var(--text)',
-  background: 'transparent',
-  border: 'none',
-  outline: 'none',
-  padding: '2px 0',
-  boxSizing: 'border-box',
-};
-const linkedPillStyle: React.CSSProperties = {
-  fontSize: '10.5px',
-  color: 'var(--accent)',
-  background: 'var(--accent-dim)',
-  borderRadius: '5px',
-  padding: '2px 7px',
-  whiteSpace: 'nowrap',
-  cursor: 'pointer',
-};
-const rowIconBtnStyle: React.CSSProperties = {
-  fontSize: '11px',
-  color: 'var(--text-faint)',
-  background: 'transparent',
-  border: '1px solid var(--border)',
-  borderRadius: '5px',
-  padding: '4px 8px',
-  cursor: 'pointer',
-};
-const rowIconBtnDangerStyle: React.CSSProperties = {
-  fontSize: '11px',
-  color: 'var(--danger)',
-  background: 'transparent',
-  border: '1px solid var(--border)',
-  borderRadius: '5px',
-  padding: '4px 8px',
-  cursor: 'pointer',
-};
-const addKeyInputStyle: React.CSSProperties = {
-  width: '100%',
-  fontFamily: 'var(--font-mono)',
-  fontSize: '12.5px',
-  color: 'var(--key)',
-  background: 'transparent',
-  border: 'none',
-  outline: 'none',
-  boxSizing: 'border-box',
-};
-const addValueInputStyle: React.CSSProperties = {
-  width: '100%',
-  fontFamily: 'var(--font-mono)',
-  fontSize: '12.5px',
-  color: 'var(--text)',
-  background: 'transparent',
-  border: 'none',
-  outline: 'none',
-  boxSizing: 'border-box',
-};
-const addVarBtnStyle: React.CSSProperties = {
-  fontSize: '11px',
-  fontWeight: 700,
-  color: 'var(--accent)',
-  background: 'transparent',
-  border: '1px solid var(--border)',
-  borderRadius: '5px',
-  padding: '4px 10px',
-  cursor: 'pointer',
-};
-const selectionBarStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: '8px',
-  padding: '8px 12px',
-  marginBottom: '8px',
-  background: 'var(--accent-dim)',
-  border: '1px solid var(--accent)',
-  borderRadius: '8px',
-};
-const selectionCountStyle: React.CSSProperties = {
-  fontSize: '12.5px',
-  fontWeight: 700,
-  color: 'var(--text)',
-  marginRight: '4px',
-};
-const selectionBtnStyle: React.CSSProperties = {
-  fontSize: '11.5px',
-  fontWeight: 600,
-  color: 'var(--text-dim)',
-  background: 'var(--panel)',
-  border: '1px solid var(--border)',
-  borderRadius: '6px',
-  padding: '5px 10px',
-  cursor: 'pointer',
-};
-const selectionBtnDangerStyle: React.CSSProperties = {
-  ...selectionBtnStyle,
-  color: 'var(--danger)',
-  marginLeft: 'auto',
-};
-const selectionClearBtnStyle: React.CSSProperties = {
-  fontSize: '13px',
-  color: 'var(--text-faint)',
-  background: 'transparent',
-  border: 'none',
-  cursor: 'pointer',
-  padding: '5px',
-};
-const selectionSelectStyle: React.CSSProperties = {
-  fontFamily: 'var(--font-mono)',
-  fontSize: '11.5px',
-  background: 'var(--panel)',
-  border: '1px solid var(--border)',
-  borderRadius: '6px',
-  color: 'var(--text)',
-  padding: '5px 8px',
-  outline: 'none',
-};

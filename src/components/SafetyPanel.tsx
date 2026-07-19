@@ -1,6 +1,10 @@
 import { useVaultStore, type SafetyTab } from '../store/useVaultStore';
-import { overlayBackdropStyle, closeXStyle } from './overlayStyles';
+import { usePresence } from '../lib/usePresence';
+import { Spinner } from './Spinner';
+import { Skeleton } from './Skeleton';
+import { CloseIcon } from './icons';
 import type { DuplicateValueGroup, LeakReport, SecretHealthRow } from '../lib/api';
+import styles from './SafetyPanel.module.css';
 
 /// The safety panel: what git can see (leak guard) and what is wrong inside
 /// the vault (secret health).
@@ -14,24 +18,25 @@ export function SafetyPanel() {
   const closeSafety = useVaultStore((s) => s.closeSafety);
   const setSafetyTab = useVaultStore((s) => s.setSafetyTab);
 
-  if (!safetyOpen) return null;
+  const { mounted, state } = usePresence(safetyOpen, 160);
+  if (!mounted) return null;
 
   return (
     <>
-      <div style={overlayBackdropStyle} onClick={closeSafety} />
-      <div style={slideoverStyle}>
-        <div style={headerStyle}>
-          <span style={titleStyle}>Safety</span>
-          <button style={closeXStyle} onClick={closeSafety}>
-            &times;
+      <div className={`v-backdrop is-${state}`} onClick={closeSafety} />
+      <aside className={`v-slideover ${styles.panel} is-${state}`}>
+        <div className={styles.header}>
+          <span className={styles.title}>Safety</span>
+          <button className="v-close-x" onClick={closeSafety} aria-label="Close">
+            <CloseIcon size={13} />
           </button>
         </div>
-        <div style={tabRowStyle}>
+        <div className={styles.tabRow} role="tablist">
           <TabButton tab="leaks" label="Git leak guard" active={safetyTab === 'leaks'} onSelect={setSafetyTab} />
           <TabButton tab="health" label="Secret health" active={safetyTab === 'health'} onSelect={setSafetyTab} />
         </div>
         {safetyTab === 'leaks' ? <LeakTab /> : <HealthTab />}
-      </div>
+      </aside>
     </>
   );
 }
@@ -49,7 +54,9 @@ function TabButton({
 }) {
   return (
     <button
-      style={active ? { ...tabBtnStyle, ...tabBtnActiveStyle } : tabBtnStyle}
+      className={`v-btn ${styles.tabBtn}`}
+      role="tab"
+      aria-selected={active}
       onClick={() => void onSelect(tab)}
     >
       {label}
@@ -68,11 +75,18 @@ function LeakTab() {
   const runLeakScan = useVaultStore((s) => s.runLeakScan);
   const projects = useVaultStore((s) => s.projects);
 
-  if (leakScanning) return <div style={emptyStyle}>Scanning your linked folders…</div>;
+  if (leakScanning) {
+    return (
+      <div className={`${styles.empty} ${styles.scanning}`}>
+        <Spinner size={12} />
+        Scanning your linked folders…
+      </div>
+    );
+  }
 
   if (projects.length === 0) {
     return (
-      <div style={emptyStyle}>
+      <div className={styles.empty}>
         No folders are linked yet. Run <code>vault link &lt;repo&gt;/&lt;env&gt;</code> in a project
         directory (or use "Link a folder" on an environment) and Vault-R can check whether any of
         these secrets are already committed.
@@ -84,15 +98,15 @@ function LeakTab() {
 
   return (
     <>
-      <div style={summaryRowStyle}>
-        <span style={total > 0 ? summaryBadStyle : summaryGoodStyle}>
+      <div className={styles.summaryRow}>
+        <span className={styles.summary} data-tone={total > 0 ? 'bad' : 'good'}>
           {total > 0
             ? `${total} finding${total === 1 ? '' : 's'} across ${leakReports.length} folder${leakReports.length === 1 ? '' : 's'}`
             : leakScanned
               ? 'No secrets are visible to git.'
               : ''}
         </span>
-        <button style={smallBtnStyle} onClick={() => void runLeakScan()}>
+        <button className={`v-btn ${styles.smallBtn}`} onClick={() => void runLeakScan()}>
           Rescan
         </button>
       </div>
@@ -108,41 +122,41 @@ function LeakReportBlock({ report }: { report: LeakReport }) {
   const fixable = report.findings.some((f) => f.fixPattern);
 
   return (
-    <div style={blockStyle}>
-      <div style={blockPathStyle} title={report.path}>
+    <div className={styles.block}>
+      <div className={styles.blockPath} title={report.path}>
         {report.path}
       </div>
-      {report.note && <div style={noteStyle}>{report.note}</div>}
+      {report.note && <div className={styles.note}>{report.note}</div>}
       {report.findings.length === 0 && !report.note && (
-        <div style={cleanStyle}>Clean — {report.filesScanned} tracked file(s) searched.</div>
+        <div className={styles.clean}>Clean — {report.filesScanned} tracked file(s) searched.</div>
       )}
       {report.findings.map((f, i) => (
-        <div key={`${f.path}-${f.line ?? 0}-${i}`} style={findingStyle}>
-          <div style={findingHeadStyle}>
-            <span style={f.severity === 'critical' ? sevCriticalStyle : sevWarnStyle}>
+        <div key={`${f.path}-${f.line ?? 0}-${i}`} className={styles.finding}>
+          <div className={styles.findingHead}>
+            <span className={styles.sev} data-severity={f.severity === 'critical' ? 'critical' : 'warn'}>
               {f.severity === 'critical' ? 'EXPOSED' : 'AT RISK'}
             </span>
-            <span style={findingPathStyle}>
+            <span className={styles.findingPath}>
               {f.path}
               {f.line !== null && `:${f.line}`}
             </span>
           </div>
           {f.key && (
-            <div style={findingKeyStyle}>
+            <div className={styles.findingKey}>
               {f.key}
               {f.repoName && f.envName && (
-                <span style={findingOriginStyle}>
+                <span className={styles.findingOrigin}>
                   {' '}
                   from {f.repoName}/{f.envName}
                 </span>
               )}
             </div>
           )}
-          <div style={findingDetailStyle}>{f.detail}</div>
+          <div className={styles.findingDetail}>{f.detail}</div>
         </div>
       ))}
       {fixable && report.gitRoot && (
-        <button style={fixBtnStyle} onClick={() => void applyGitignoreFix(report)}>
+        <button className={`v-btn ${styles.fixBtn}`} onClick={() => void applyGitignoreFix(report)}>
           Add to .gitignore
         </button>
       )}
@@ -159,25 +173,36 @@ function HealthTab() {
   const healthLoading = useVaultStore((s) => s.healthLoading);
   const refreshHealth = useVaultStore((s) => s.refreshHealth);
 
-  if (healthLoading || !health) return <div style={emptyStyle}>Checking your secrets…</div>;
+  if (healthLoading || !health) {
+    return (
+      <>
+        {[0, 1, 2, 3].map((i) => (
+          <div key={i} className={styles.skelBlock}>
+            <Skeleton height={12} width={`${58 - i * 7}%`} />
+            <Skeleton height={10} width={`${40 + i * 5}%`} />
+          </div>
+        ))}
+      </>
+    );
+  }
 
   const clean = health.rows.length === 0 && health.duplicates.length === 0;
 
   return (
     <>
-      <div style={summaryRowStyle}>
-        <span style={clean ? summaryGoodStyle : summaryBadStyle}>
+      <div className={styles.summaryRow}>
+        <span className={styles.summary} data-tone={clean ? 'good' : 'bad'}>
           {clean
             ? `All ${health.totalSecrets} secrets look healthy.`
             : `${health.rows.length} of ${health.totalSecrets} secrets need attention`}
         </span>
-        <button style={smallBtnStyle} onClick={() => void refreshHealth()}>
+        <button className={`v-btn ${styles.smallBtn}`} onClick={() => void refreshHealth()}>
           Recheck
         </button>
       </div>
 
       {!clean && (
-        <div style={countRowStyle}>
+        <div className={styles.countRow}>
           <Count label="empty" value={health.emptyCount} bad />
           <Count label="placeholder" value={health.placeholderCount} bad />
           <Count label="stale" value={health.staleCount} />
@@ -191,8 +216,8 @@ function HealthTab() {
 
       {health.duplicates.length > 0 && (
         <>
-          <div style={sectionHeadStyle}>Identical values that are not linked</div>
-          <div style={sectionSubStyle}>
+          <div className={styles.sectionHead}>Identical values that are not linked</div>
+          <div className={styles.sectionSub}>
             Link them and one edit updates every copy — that is what link groups are for.
           </div>
           {health.duplicates.map((group, i) => (
@@ -207,8 +232,11 @@ function HealthTab() {
 function Count({ label, value, bad }: { label: string; value: number; bad?: boolean }) {
   if (value === 0) return null;
   return (
-    <span style={countPillStyle}>
-      <b style={bad ? countBadStyle : countWarnStyle}>{value}</b> {label}
+    <span className={styles.countPill}>
+      <b className={styles.countValue} data-tone={bad ? 'bad' : 'warn'}>
+        {value}
+      </b>{' '}
+      {label}
     </span>
   );
 }
@@ -216,16 +244,16 @@ function Count({ label, value, bad }: { label: string; value: number; bad?: bool
 function HealthRow({ row }: { row: SecretHealthRow }) {
   const jumpToVariable = useVaultStore((s) => s.jumpToVariable);
   return (
-    <div style={blockStyle}>
-      <div style={healthRowHeadStyle} onClick={() => void jumpToVariable(row.envId, row.varId)}>
-        <span style={healthKeyStyle}>{row.key}</span>
-        <span style={healthWhereStyle}>
+    <div className={styles.block}>
+      <button className={styles.healthRowHead} onClick={() => void jumpToVariable(row.envId, row.varId)}>
+        <span className={styles.healthKey}>{row.key}</span>
+        <span className={styles.healthWhere}>
           {row.repoName}/{row.envName}
         </span>
-      </div>
+      </button>
       {row.issues.map((issue, i) => (
-        <div key={i} style={findingDetailStyle}>
-          <span style={issue.severity === 'critical' ? sevCriticalStyle : sevWarnStyle}>
+        <div key={i} className={styles.findingDetail}>
+          <span className={styles.sev} data-severity={issue.severity === 'critical' ? 'critical' : 'warn'}>
             {issue.kind === 'rotationDue' ? 'ROTATE' : issue.kind.toUpperCase()}
           </span>{' '}
           {issue.detail}
@@ -238,176 +266,16 @@ function HealthRow({ row }: { row: SecretHealthRow }) {
 function DuplicateBlock({ group }: { group: DuplicateValueGroup }) {
   const linkDuplicateGroup = useVaultStore((s) => s.linkDuplicateGroup);
   return (
-    <div style={blockStyle}>
-      <div style={healthKeyStyle}>{group.key || 'Same value, different keys'}</div>
+    <div className={styles.block}>
+      <div className={styles.healthKey}>{group.key || 'Same value, different keys'}</div>
       {group.locations.map((l) => (
-        <div key={l.varId} style={healthWhereStyle}>
+        <div key={l.varId} className={styles.healthWhere}>
           {l.repoName}/{l.envName} · {l.key}
         </div>
       ))}
-      <button style={fixBtnStyle} onClick={() => void linkDuplicateGroup(group)}>
+      <button className={`v-btn ${styles.fixBtn}`} onClick={() => void linkDuplicateGroup(group)}>
         Link these {group.locations.length}
       </button>
     </div>
   );
 }
-
-const slideoverStyle: React.CSSProperties = {
-  position: 'fixed',
-  top: 0,
-  right: 0,
-  bottom: 0,
-  width: '420px',
-  background: 'var(--panel)',
-  borderLeft: '1px solid var(--border)',
-  zIndex: 41,
-  padding: '22px',
-  overflowY: 'auto',
-  animation: 'vaultSlideIn 0.22s ease',
-};
-const headerStyle: React.CSSProperties = { display: 'flex', alignItems: 'center', marginBottom: '12px' };
-const titleStyle: React.CSSProperties = { fontSize: '16px', fontWeight: 700, color: 'var(--text)', flex: 1 };
-
-const tabRowStyle: React.CSSProperties = { display: 'flex', gap: '6px', marginBottom: '14px' };
-const tabBtnStyle: React.CSSProperties = {
-  flex: 1,
-  fontSize: '12px',
-  fontWeight: 600,
-  color: 'var(--text-dim)',
-  background: 'transparent',
-  border: '1px solid var(--border)',
-  borderRadius: '6px',
-  padding: '7px 10px',
-  cursor: 'pointer',
-};
-const tabBtnActiveStyle: React.CSSProperties = {
-  color: 'var(--accent)',
-  background: 'var(--accent-dim)',
-  borderColor: 'var(--accent)',
-};
-
-const summaryRowStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: '10px',
-  marginBottom: '12px',
-};
-const summaryGoodStyle: React.CSSProperties = { flex: 1, fontSize: '12.5px', color: 'var(--accent)' };
-const summaryBadStyle: React.CSSProperties = { flex: 1, fontSize: '12.5px', color: 'var(--danger)', fontWeight: 600 };
-const smallBtnStyle: React.CSSProperties = {
-  fontSize: '11px',
-  color: 'var(--text-dim)',
-  background: 'transparent',
-  border: '1px solid var(--border)',
-  borderRadius: '5px',
-  padding: '4px 9px',
-  cursor: 'pointer',
-  flexShrink: 0,
-};
-
-const countRowStyle: React.CSSProperties = {
-  display: 'flex',
-  flexWrap: 'wrap',
-  gap: '10px',
-  marginBottom: '14px',
-};
-const countPillStyle: React.CSSProperties = { fontSize: '11.5px', color: 'var(--text-faint)' };
-const countBadStyle: React.CSSProperties = { color: 'var(--danger)' };
-const countWarnStyle: React.CSSProperties = { color: 'var(--env-staging)' };
-
-const blockStyle: React.CSSProperties = {
-  border: '1px solid var(--border)',
-  borderRadius: '8px',
-  padding: '10px 12px',
-  marginBottom: '10px',
-};
-const blockPathStyle: React.CSSProperties = {
-  fontFamily: 'var(--font-mono)',
-  fontSize: '11.5px',
-  color: 'var(--text-dim)',
-  overflow: 'hidden',
-  textOverflow: 'ellipsis',
-  whiteSpace: 'nowrap',
-  marginBottom: '6px',
-};
-const noteStyle: React.CSSProperties = { fontSize: '11.5px', color: 'var(--text-faint)', lineHeight: 1.5 };
-const cleanStyle: React.CSSProperties = { fontSize: '11.5px', color: 'var(--text-faint)' };
-const emptyStyle: React.CSSProperties = {
-  fontSize: '12.5px',
-  color: 'var(--text-faint)',
-  lineHeight: 1.6,
-  padding: '8px 0',
-};
-
-const findingStyle: React.CSSProperties = { padding: '8px 0', borderTop: '1px solid var(--border-light)' };
-const findingHeadStyle: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: '8px' };
-const sevCriticalStyle: React.CSSProperties = {
-  fontSize: '9.5px',
-  fontWeight: 700,
-  letterSpacing: '0.5px',
-  color: 'var(--danger)',
-};
-const sevWarnStyle: React.CSSProperties = {
-  fontSize: '9.5px',
-  fontWeight: 700,
-  letterSpacing: '0.5px',
-  color: 'var(--env-staging)',
-};
-const findingPathStyle: React.CSSProperties = {
-  fontFamily: 'var(--font-mono)',
-  fontSize: '11.5px',
-  color: 'var(--text)',
-  overflow: 'hidden',
-  textOverflow: 'ellipsis',
-  whiteSpace: 'nowrap',
-};
-const findingKeyStyle: React.CSSProperties = {
-  fontFamily: 'var(--font-mono)',
-  fontSize: '12px',
-  color: 'var(--key)',
-  marginTop: '3px',
-};
-const findingOriginStyle: React.CSSProperties = { color: 'var(--text-faint)', fontSize: '11px' };
-const findingDetailStyle: React.CSSProperties = {
-  fontSize: '11.5px',
-  color: 'var(--text-faint)',
-  lineHeight: 1.5,
-  marginTop: '3px',
-};
-const fixBtnStyle: React.CSSProperties = {
-  marginTop: '8px',
-  fontSize: '11.5px',
-  fontWeight: 600,
-  color: 'var(--accent)',
-  background: 'transparent',
-  border: '1px solid var(--border)',
-  borderRadius: '5px',
-  padding: '5px 10px',
-  cursor: 'pointer',
-};
-
-const healthRowHeadStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'baseline',
-  gap: '8px',
-  cursor: 'pointer',
-};
-const healthKeyStyle: React.CSSProperties = {
-  fontFamily: 'var(--font-mono)',
-  fontSize: '12.5px',
-  color: 'var(--key)',
-};
-const healthWhereStyle: React.CSSProperties = { fontSize: '11px', color: 'var(--text-faint)' };
-const sectionHeadStyle: React.CSSProperties = {
-  fontSize: '10.5px',
-  fontWeight: 700,
-  color: 'var(--text-faint)',
-  letterSpacing: '0.5px',
-  marginTop: '18px',
-};
-const sectionSubStyle: React.CSSProperties = {
-  fontSize: '11.5px',
-  color: 'var(--text-faint)',
-  lineHeight: 1.5,
-  margin: '4px 0 10px',
-};

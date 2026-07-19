@@ -1,7 +1,11 @@
 import { useVaultStore } from '../store/useVaultStore';
-import { overlayBackdropStyle, closeXStyle } from './overlayStyles';
+import { usePresence } from '../lib/usePresence';
 import { envColor } from '../lib/envColor';
+import { Skeleton } from './Skeleton';
+import { CloseIcon } from './icons';
+import { Select } from './Select';
 import type { DiffRow } from '../lib/api';
+import styles from './CompareView.module.css';
 
 export function CompareView() {
   const compareOpen = useVaultStore((s) => s.compareOpen);
@@ -17,7 +21,8 @@ export function CompareView() {
   const copyAllMissing = useVaultStore((s) => s.copyAllMissing);
   const linkCompareMatch = useVaultStore((s) => s.linkCompareMatch);
 
-  if (!compareOpen) return null;
+  const { mounted, state } = usePresence(compareOpen, 160);
+  if (!mounted) return null;
 
   const activeRepo = repos.find((r) => r.id === activeRepoId);
   const activeEnv = activeRepo?.envs.find((e) => e.id === activeEnvId);
@@ -36,54 +41,63 @@ export function CompareView() {
   const onlyInB = compareRows.filter((r) => r.kind === 'added');
   const differing = compareRows.filter((r) => r.kind === 'changed');
 
+  const envTone = { '--env-tone': activeEnv ? envColor(activeEnv.name) : 'var(--text)' } as React.CSSProperties;
+
   return (
     <>
-      <div style={overlayBackdropStyle} onClick={closeCompare} />
-      <div style={slideoverStyle}>
-        <div style={slideoverHeaderStyle}>
-          <span style={slideoverTitleStyle}>Compare environments</span>
-          <button style={closeXStyle} onClick={closeCompare}>
-            &times;
+      <div className={`v-backdrop is-${state}`} onClick={closeCompare} />
+      <aside className={`v-slideover v-slideover--wide is-${state}`}>
+        <div className={styles.header}>
+          <span className={styles.title}>Compare environments</span>
+          <button className="v-close-x" onClick={closeCompare} aria-label="Close">
+            <CloseIcon size={13} />
           </button>
         </div>
 
-        <div style={pickerRowStyle}>
-          <span style={{ ...envPillStyle, color: activeEnv ? envColor(activeEnv.name) : undefined }}>
+        <div className={styles.pickerRow}>
+          <span className={styles.envPill} style={envTone}>
             {activeRepo && activeEnv ? `${activeRepo.name}/${activeEnv.name}` : '—'}
           </span>
-          <span style={vsStyle}>vs</span>
-          <select
-            style={envSelectStyle}
-            value={compareEnvBId ?? ''}
-            onChange={(e) => void setCompareEnvB(e.target.value)}
-          >
-            <option value="" disabled>
-              Choose an environment…
-            </option>
-            {envOptions.map((o) => (
-              <option key={o.id} value={o.id}>
-                {o.label}
-              </option>
-            ))}
-          </select>
+          <span className={styles.vs}>vs</span>
+          <Select
+            className={styles.envSelect}
+            value={compareEnvBId}
+            options={envOptions.map((o) => ({ value: o.id, label: o.label }))}
+            placeholder="Choose an environment…"
+            ariaLabel="Environment to compare against"
+            onChange={(v) => void setCompareEnvB(v)}
+          />
         </div>
 
-        {!compareEnvBId && <div style={emptyStyle}>Pick an environment to compare against.</div>}
+        {!compareEnvBId && <div className={styles.empty}>Pick an environment to compare against.</div>}
 
-        {compareEnvBId && !compareBusy && compareRows.length === 0 && compareUnlinkedMatches.length === 0 && (
-          <div style={emptyStyle}>These environments match exactly.</div>
+        {compareBusy && (
+          <div className={styles.section}>
+            {[0, 1, 2].map((i) => (
+              <div key={i} className={styles.skelRow}>
+                <div className={styles.skelBody}>
+                  <Skeleton height={11} width={`${52 - i * 8}%`} />
+                  <Skeleton height={9} width={`${34 + i * 6}%`} />
+                </div>
+              </div>
+            ))}
+          </div>
         )}
 
-        {compareUnlinkedMatches.length > 0 && (
-          <div style={sectionStyle}>
-            <div style={sectionTitleStyle}>
+        {compareEnvBId && !compareBusy && compareRows.length === 0 && compareUnlinkedMatches.length === 0 && (
+          <div className={styles.empty}>These environments match exactly.</div>
+        )}
+
+        {!compareBusy && compareUnlinkedMatches.length > 0 && (
+          <div className={styles.section}>
+            <div className={styles.sectionTitle}>
               {compareUnlinkedMatches.length} secret{compareUnlinkedMatches.length === 1 ? '' : 's'} match but
               {compareUnlinkedMatches.length === 1 ? " isn't" : " aren't"} linked
             </div>
             {compareUnlinkedMatches.map((m) => (
-              <div key={m.key} style={matchRowStyle}>
-                <span style={diffKeyStyle}>{m.key}</span>
-                <button style={smallBtnStyle} onClick={() => void linkCompareMatch(m)}>
+              <div key={m.key} className={styles.matchRow}>
+                <span className={styles.diffKey}>{m.key}</span>
+                <button className={`v-btn ${styles.smallBtn}`} onClick={() => void linkCompareMatch(m)}>
                   Link these
                 </button>
               </div>
@@ -91,7 +105,7 @@ export function CompareView() {
           </div>
         )}
 
-        {onlyInA.length > 0 && (
+        {!compareBusy && onlyInA.length > 0 && (
           <DiffSection
             title={`Only in ${activeEnv?.name ?? 'A'}`}
             rows={onlyInA}
@@ -99,7 +113,7 @@ export function CompareView() {
             copyAllLabel={`Copy all → ${envBLabel}`}
           />
         )}
-        {onlyInB.length > 0 && (
+        {!compareBusy && onlyInB.length > 0 && (
           <DiffSection
             title={`Only in ${envBLabel || 'B'}`}
             rows={onlyInB}
@@ -107,8 +121,8 @@ export function CompareView() {
             copyAllLabel={`Copy all → ${activeEnv?.name ?? 'A'}`}
           />
         )}
-        {differing.length > 0 && <DiffSection title="Different values" rows={differing} />}
-      </div>
+        {!compareBusy && differing.length > 0 && <DiffSection title="Different values" rows={differing} />}
+      </aside>
     </>
   );
 }
@@ -125,11 +139,11 @@ function DiffSection({
   copyAllLabel?: string;
 }) {
   return (
-    <div style={sectionStyle}>
-      <div style={sectionHeaderRowStyle}>
-        <span style={sectionTitleStyle}>{title}</span>
+    <div className={styles.section}>
+      <div className={styles.sectionHeaderRow}>
+        <span className={styles.sectionTitle}>{title}</span>
         {onCopyAll && (
-          <button style={smallBtnStyle} onClick={onCopyAll}>
+          <button className={`v-btn ${styles.smallBtn}`} onClick={onCopyAll}>
             {copyAllLabel}
           </button>
         )}
@@ -147,17 +161,17 @@ function CompareRow({ row }: { row: DiffRow }) {
   const copyCompareRow = useVaultStore((s) => s.copyCompareRow);
 
   return (
-    <div style={diffRowStyle}>
-      <div style={diffBodyStyle}>
-        <div style={diffKeyStyle}>{row.key}</div>
-        <div style={diffValueStyle}>{revealed ? describeValues(row) : '••••••••'}</div>
+    <div className={styles.diffRow}>
+      <div className={styles.diffBody}>
+        <div className={styles.diffKey}>{row.key}</div>
+        <div className={styles.diffValue}>{revealed ? describeValues(row) : '••••••••'}</div>
       </div>
-      <button style={diffIconBtnStyle} onClick={() => toggleCompareReveal(row.key)}>
+      <button className={`v-btn ${styles.diffBtn}`} onClick={() => toggleCompareReveal(row.key)}>
         {revealed ? 'hide' : 'show'}
       </button>
       {row.kind !== 'added' && (
         <button
-          style={diffIconBtnStyle}
+          className={`v-btn ${styles.diffBtn}`}
           title="Copy A's value into B"
           onClick={() => void copyCompareRow(row.key, 'aToB')}
         >
@@ -166,7 +180,7 @@ function CompareRow({ row }: { row: DiffRow }) {
       )}
       {row.kind !== 'removed' && (
         <button
-          style={diffIconBtnStyle}
+          className={`v-btn ${styles.diffBtn}`}
           title="Copy B's value into A"
           onClick={() => void copyCompareRow(row.key, 'bToA')}
         >
@@ -182,100 +196,3 @@ function describeValues(row: DiffRow): string {
   if (row.kind === 'added') return row.newValue ?? '';
   return row.oldValue ?? '';
 }
-
-const slideoverStyle: React.CSSProperties = {
-  position: 'fixed',
-  top: 0,
-  right: 0,
-  bottom: 0,
-  width: '480px',
-  background: 'var(--panel)',
-  borderLeft: '1px solid var(--border)',
-  zIndex: 41,
-  padding: '22px 22px',
-  overflowY: 'auto',
-  animation: 'vaultSlideIn 0.22s ease',
-};
-const slideoverHeaderStyle: React.CSSProperties = { display: 'flex', alignItems: 'center', marginBottom: '14px' };
-const slideoverTitleStyle: React.CSSProperties = { fontSize: '16px', fontWeight: 700, color: 'var(--text)', flex: 1 };
-const pickerRowStyle: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '18px' };
-const envPillStyle: React.CSSProperties = {
-  fontFamily: 'var(--font-mono)',
-  fontSize: '12.5px',
-  fontWeight: 700,
-  background: 'rgba(255,255,255,0.05)',
-  borderRadius: '5px',
-  padding: '5px 9px',
-};
-const vsStyle: React.CSSProperties = { fontSize: '11.5px', color: 'var(--text-faint)' };
-const envSelectStyle: React.CSSProperties = {
-  flex: 1,
-  fontFamily: 'var(--font-mono)',
-  fontSize: '12.5px',
-  background: 'var(--panel-2)',
-  border: '1px solid var(--border)',
-  borderRadius: '6px',
-  color: 'var(--text)',
-  padding: '6px 8px',
-  outline: 'none',
-};
-const emptyStyle: React.CSSProperties = { fontSize: '12.5px', color: 'var(--text-faint)' };
-const sectionStyle: React.CSSProperties = { marginBottom: '18px' };
-const sectionHeaderRowStyle: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' };
-const sectionTitleStyle: React.CSSProperties = {
-  fontSize: '11px',
-  fontWeight: 700,
-  color: 'var(--text-faint)',
-  letterSpacing: '0.4px',
-  flex: 1,
-};
-const matchRowStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: '8px',
-  padding: '7px 0',
-  borderBottom: '1px solid var(--border-light)',
-};
-const smallBtnStyle: React.CSSProperties = {
-  fontSize: '11px',
-  fontWeight: 600,
-  color: 'var(--accent)',
-  background: 'transparent',
-  border: '1px solid var(--border)',
-  borderRadius: '5px',
-  padding: '4px 8px',
-  cursor: 'pointer',
-  whiteSpace: 'nowrap',
-};
-const diffRowStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: '6px',
-  padding: '7px 0',
-  borderBottom: '1px solid var(--border-light)',
-};
-const diffBodyStyle: React.CSSProperties = { flex: 1, minWidth: 0 };
-const diffKeyStyle: React.CSSProperties = {
-  fontFamily: 'var(--font-mono)',
-  fontSize: '12.5px',
-  color: 'var(--key)',
-};
-const diffValueStyle: React.CSSProperties = {
-  fontFamily: 'var(--font-mono)',
-  fontSize: '11px',
-  color: 'var(--text-faint)',
-  overflow: 'hidden',
-  textOverflow: 'ellipsis',
-  whiteSpace: 'nowrap',
-};
-const diffIconBtnStyle: React.CSSProperties = {
-  fontSize: '10px',
-  color: 'var(--text-faint)',
-  background: 'transparent',
-  border: '1px solid var(--border)',
-  borderRadius: '4px',
-  padding: '3px 6px',
-  cursor: 'pointer',
-  flexShrink: 0,
-  whiteSpace: 'nowrap',
-};
