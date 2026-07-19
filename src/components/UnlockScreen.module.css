@@ -1,98 +1,399 @@
+/* Lock screen: what the app knows (left) and what it needs from you (right).
+   Ported from the global auth.css so it lives beside its component like every
+   other surface. Entrance animations use the global .v-enter utility — a
+   module cannot name a keyframe without it being hashed into nothing. */
+
 .root {
   height: 100vh;
   width: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: var(--space-6);
+  padding: var(--space-7);
   background: var(--bg);
+  background-image: radial-gradient(
+    900px 520px at 12% -10%,
+    rgba(88, 230, 168, 0.05),
+    transparent 70%
+  );
+  overflow-y: auto;
 }
 
-.card {
-  width: 380px;
-  max-width: 100%;
+.shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 372px;
+  gap: 56px;
+  align-items: center;
+  width: 100%;
+  max-width: 880px;
+}
+
+/* ---- left pane: identity and manifest ---- */
+
+.brand {
   display: flex;
   flex-direction: column;
+  gap: 10px;
+}
+
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.wordmark {
+  font-family: var(--font-mono);
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: var(--text);
+  line-height: 1;
+}
+
+.wordmark em {
+  font-style: normal;
+  color: var(--accent);
+}
+
+.tagline {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-dim);
+  max-width: 34ch;
+}
+
+/* ---- the manifest ---- */
+
+.manifest {
+  margin-top: 28px;
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+}
+
+.manifestHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: var(--space-4);
-  padding: 36px var(--space-7);
+  margin-bottom: var(--space-4);
+  --enter-delay: 40ms;
+}
+
+.manifestLabel {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.state {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 3px var(--space-3);
+  border-radius: 999px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.state[data-found='true'] {
+  color: var(--accent);
+  background: var(--accent-dim);
+  border-color: rgba(88, 230, 168, 0.28);
+}
+
+.state[data-found='false'] {
+  color: var(--danger);
+  background: rgba(240, 119, 110, 0.12);
+  border-color: rgba(240, 119, 110, 0.3);
+}
+
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin: 0;
+}
+
+/* Rows arrive in sequence, so the manifest reads as being assembled rather
+   than appearing all at once. */
+.row {
+  display: grid;
+  grid-template-columns: 74px minmax(0, 1fr);
+  gap: 14px;
+  align-items: baseline;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.rows .row:nth-child(1) {
+  --enter-delay: 100ms;
+}
+.rows .row:nth-child(2) {
+  --enter-delay: 140ms;
+}
+.rows .row:nth-child(3) {
+  --enter-delay: 180ms;
+}
+.rows .row:nth-child(4) {
+  --enter-delay: 220ms;
+}
+.rows .row:nth-child(5) {
+  --enter-delay: 260ms;
+}
+
+.row dt {
+  color: var(--key);
+  letter-spacing: 0.04em;
+}
+
+.row dd {
+  margin: 0;
+  color: var(--text-dim);
+  overflow-wrap: anywhere;
+}
+
+.row dd strong {
+  font-weight: 500;
+  color: var(--text);
+}
+
+.warn {
+  color: var(--danger);
+}
+
+/* ---- right pane: the form ---- */
+
+.card {
+  display: flex;
+  flex-direction: column;
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 14px;
   box-shadow: var(--edge-top), var(--elev-3);
+  padding: 30px 28px;
   --enter-dur: var(--dur-4);
 }
 
-.glyph {
-  font-family: var(--font-mono);
-  color: var(--accent);
-  font-weight: 700;
-  font-size: 22px;
-  margin-bottom: var(--space-1);
-}
-
 .title {
-  font-size: 19px;
-  font-weight: 700;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
   color: var(--text);
 }
 
 .sub {
-  font-size: 12.5px;
+  margin-top: var(--space-3);
+  font-size: 13px;
+  line-height: 1.6;
   color: var(--text-dim);
-  line-height: 1.5;
-  margin-bottom: var(--space-3);
+}
+
+.field {
+  margin-top: 18px;
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.field + .field {
+  margin-top: 10px;
 }
 
 .input {
   font-family: var(--font-mono);
-  padding: 9px var(--space-4);
+  font-size: 13px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  padding: 11px 13px;
+  width: 100%;
+  outline: none;
+  transition:
+    border-color var(--t-hover),
+    box-shadow var(--t-hover);
 }
 
-.rememberRow {
+.input::placeholder {
+  color: var(--text-faint);
+}
+
+.input:focus,
+.input:focus-visible {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-dim);
+}
+
+.inputToggle {
+  padding-right: 42px;
+}
+
+.reveal {
+  position: absolute;
+  right: var(--space-2);
   display: flex;
   align-items: center;
-  gap: var(--space-3);
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  transition:
+    color var(--t-hover),
+    background-color var(--t-hover),
+    box-shadow var(--t-hover);
+}
+
+.reveal:hover {
+  color: var(--text-dim);
+  background: var(--panel-3);
+}
+
+.reveal:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.remember {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: var(--space-5);
   font-size: 12.5px;
   color: var(--text-dim);
   cursor: pointer;
+  user-select: none;
 }
 
 .error {
-  font-size: 12px;
-  color: var(--danger);
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  margin-top: var(--space-5);
+  padding: 10px var(--space-4);
+  font-size: 12.5px;
   line-height: 1.5;
+  color: var(--danger);
+  background: rgba(240, 119, 110, 0.09);
+  border: 1px solid rgba(240, 119, 110, 0.24);
+  border-radius: 8px;
+}
+
+.errorIcon {
+  flex: none;
+  margin-top: 1px;
 }
 
 .submit {
-  padding: 10px var(--space-4);
-  margin-top: var(--space-1);
+  margin-top: 20px;
+  font-size: 13px;
+  border-radius: 8px;
+  padding: 11px 14px;
 }
 
-.footerLinks {
+/* ---- recovery routes ---- */
+
+.routes {
+  margin-top: 18px;
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--border);
   display: flex;
-  justify-content: space-between;
-  gap: var(--space-3);
-  margin-top: 2px;
+  flex-direction: column;
+  gap: 2px;
 }
 
-.linkBtn {
-  font-size: 11.5px;
+.routesLabel {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
   color: var(--text-faint);
+  margin-bottom: var(--space-3);
+}
+
+.route {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: var(--space-3) 10px;
+  margin-left: -10px;
+  font-size: 12.5px;
+  text-align: left;
+  color: var(--text-dim);
   background: transparent;
   border: none;
-  border-radius: 4px;
+  border-radius: 7px;
   cursor: pointer;
-  padding: 2px;
-  margin: -2px;
-  text-decoration: underline;
+  transition:
+    color var(--t-hover),
+    background-color var(--t-hover),
+    box-shadow var(--t-hover);
+}
+
+.route:hover {
+  color: var(--text);
+  background: var(--panel-2);
+}
+
+.route:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.routeIcon {
+  flex: none;
+  color: var(--text-faint);
   transition: color var(--t-hover);
 }
 
-.linkBtn:hover {
-  color: var(--text-dim);
+.route:hover .routeIcon {
+  color: var(--accent);
 }
 
-.linkBtn:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
+/* ---- narrow windows ---- */
+
+@media (max-width: 900px) {
+  .root {
+    align-items: flex-start;
+    padding: 40px var(--space-6);
+  }
+
+  .shell {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-7);
+    max-width: 420px;
+  }
+
+  /* The form is the job; the manifest is context. Order follows priority. */
+  .brand {
+    order: 2;
+  }
+
+  .card {
+    order: 1;
+  }
+
+  .manifest {
+    margin-top: 20px;
+  }
 }

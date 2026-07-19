@@ -101,6 +101,54 @@ export function RestoreIcon({ size, className }: IconProps) {
   );
 }
 
+export function KeyIcon({ size, className }: IconProps) {
+  return (
+    <Svg size={size} className={className}>
+      <circle cx="5.6" cy="10.4" r="2.9" />
+      <path d="M7.7 8.3 13.4 2.6" />
+      <path d="M11.2 4.8l1.9 1.9" />
+    </Svg>
+  );
+}
+
+export function ArchiveIcon({ size, className }: IconProps) {
+  return (
+    <Svg size={size} className={className}>
+      <rect x="2.3" y="2.7" width="11.4" height="3.2" rx="1" />
+      <path d="M3.5 5.9v6a1.4 1.4 0 0 0 1.4 1.4h6.2a1.4 1.4 0 0 0 1.4-1.4v-6" />
+      <path d="M6.6 8.5h2.8" />
+    </Svg>
+  );
+}
+
+export function PasswordIcon({ size, className }: IconProps) {
+  return (
+    <Svg size={size} className={className}>
+      <rect x="2.2" y="4.8" width="11.6" height="6.6" rx="1.8" />
+      <path d="M5.2 8.1h.01M8 8.1h.01M10.8 8.1h.01" />
+    </Svg>
+  );
+}
+
+export function EyeIcon({ size, className }: IconProps) {
+  return (
+    <Svg size={size} className={className}>
+      <path d="M1.6 8S4.2 3.7 8 3.7 14.4 8 14.4 8 11.8 12.3 8 12.3 1.6 8 1.6 8Z" />
+      <circle cx="8" cy="8" r="1.9" />
+    </Svg>
+  );
+}
+
+export function EyeOffIcon({ size, className }: IconProps) {
+  return (
+    <Svg size={size} className={className}>
+      <path d="M6.9 4.1A6.4 6.4 0 0 1 8 3.7c3.8 0 6.4 4.3 6.4 4.3a11.4 11.4 0 0 1-2.3 2.7" />
+      <path d="M4.3 5.5A11.4 11.4 0 0 0 1.6 8S4.2 12.3 8 12.3a6.3 6.3 0 0 0 2.3-.43" />
+      <path d="M2.8 2.8l10.4 10.4" />
+    </Svg>
+  );
+}
+
 export function PlusIcon({ size, className }: IconProps) {
   return (
     <Svg size={size} className={className}>

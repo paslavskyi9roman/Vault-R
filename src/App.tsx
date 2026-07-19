@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useVaultStore } from './store/useVaultStore';
-import { UnlockScreen, ResetPasswordScreen } from './components/UnlockScreen';
+import { UnlockScreen, ResetPasswordScreen, StartupErrorScreen } from './components/UnlockScreen';
 import { SettingsModal } from './components/SettingsModal';
 import { TopBar } from './components/TopBar';
 import { Sidebar } from './components/Sidebar';
@@ -52,6 +52,7 @@ function useIdleAutoLock(enabled: boolean, minutes: number) {
 
 function App() {
   const checkingVault = useVaultStore((s) => s.checkingVault);
+  const initError = useVaultStore((s) => s.initError);
   const locked = useVaultStore((s) => s.locked);
   const mustResetPassword = useVaultStore((s) => s.mustResetPassword);
   const autoLockMinutes = useVaultStore((s) => s.autoLockMinutes);
@@ -78,7 +79,7 @@ function App() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [toggleCmdk, closeAllOverlays]);
 
-  if (checkingVault) {
+  if (checkingVault && !initError) {
     return (
       <div className={styles.splash}>
         <div className={`${styles.splashInner} v-enter`}>
@@ -89,6 +90,17 @@ function App() {
           <Spinner size={13} />
         </span>
       </div>
+    );
+  }
+
+  // Falling through to the lock screen here would offer to create a vault
+  // over one we merely failed to read.
+  if (initError) {
+    return (
+      <>
+        <StartupErrorScreen />
+        <Toast />
+      </>
     );
   }
 

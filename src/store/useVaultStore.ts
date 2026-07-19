@@ -16,6 +16,7 @@ import {
   type SnapshotWithStats,
   type UnlinkedMatch,
   type VariableWithUsage,
+  type VaultStatus,
 } from '../lib/api';
 import { isProtectedEnv } from '../lib/envColor';
 
@@ -55,6 +56,11 @@ interface VaultState {
   // ---- lifecycle ----
   checkingVault: boolean;
   vaultExists: boolean;
+  /// Set when the startup check failed: "could not look" is not "no vault".
+  initError: string | null;
+  vaultStatus: VaultStatus | null;
+  /// Lets the user reach the unlock form when the check says there is no vault.
+  forceExisting: boolean;
   locked: boolean;
   authBusy: boolean;
   authError: string | null;
@@ -190,6 +196,7 @@ interface VaultState {
 
   // ---- actions ----
   init: () => Promise<void>;
+  setForceExisting: (v: boolean) => void;
   createVault: (password: string, remember: boolean) => Promise<void>;
   unlockVault: (password: string, remember: boolean) => Promise<void>;
   lockVault: () => Promise<void>;
@@ -342,6 +349,9 @@ interface VaultState {
 export const useVaultStore = create<VaultState>((set, get) => ({
   checkingVault: true,
   vaultExists: false,
+  initError: null,
+  vaultStatus: null,
+  forceExisting: false,
   locked: true,
   authBusy: false,
   authError: null,
@@ -452,22 +462,46 @@ export const useVaultStore = create<VaultState>((set, get) => ({
   toast: null,
 
   init: async () => {
-    const exists = await api.vaultExists();
-    set({ vaultExists: exists, checkingVault: false });
-    if (exists) {
-      const unlocked = await api.vaultTryKeychain();
-      if (unlocked) {
-        set({ locked: false });
-        await afterUnlock(get);
-      }
+    set({ checkingVault: true, initError: null });
+
+    let exists: boolean;
+    let status: VaultStatus | null = null;
+    try {
+      [exists, status] = await Promise.all([api.vaultExists(), api.vaultStatus()]);
+    } catch (e) {
+      // The lookup failed, so we know nothing about the vault. Offering to
+      // create one here is how a recoverable vault looks like a lost one.
+      set({ checkingVault: false, initError: String(e) });
+      return;
     }
+    set({ vaultExists: exists, vaultStatus: status, checkingVault: false });
+    if (!exists) return;
+
+    // A keychain that refuses to answer falls through to the password prompt.
+    let unlocked = false;
+    try {
+      unlocked = await api.vaultTryKeychain();
+    } catch {
+      unlocked = false;
+    }
+    if (!unlocked) return;
+    set({ locked: false });
+    await afterUnlock(get);
   },
+
+  setForceExisting: (v) => set({ forceExisting: v, authError: null }),
 
   createVault: async (password, remember) => {
     set({ authBusy: true, authError: null });
     try {
       await api.vaultCreate(password, remember);
-      set({ locked: false, vaultExists: true, onboarding: true, onboardingStep: 0 });
+      set({
+        locked: false,
+        vaultExists: true,
+        forceExisting: false,
+        onboarding: true,
+        onboardingStep: 0,
+      });
       await get().refreshRepos();
     } catch (e) {
       set({ authError: String(e) });
@@ -480,7 +514,7 @@ export const useVaultStore = create<VaultState>((set, get) => ({
     set({ authBusy: true, authError: null });
     try {
       await api.vaultUnlock(password, remember);
-      set({ locked: false });
+      set({ locked: false, vaultExists: true, forceExisting: false });
       await afterUnlock(get);
     } catch (e) {
       set({ authError: String(e) });
@@ -1254,7 +1288,8 @@ export const useVaultStore = create<VaultState>((set, get) => ({
         danger: true,
         onConfirm: async () => {
           await api.restoreBackup(path);
-          set({ authError: null, vaultExists: true });
+          const status = await api.vaultStatus().catch(() => null);
+          set({ authError: null, vaultExists: true, forceExisting: false, vaultStatus: status });
           get().showToast('Backup restored — unlock with its master password');
         },
       });
