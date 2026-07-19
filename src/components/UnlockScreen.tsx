@@ -122,11 +122,13 @@ function PasswordField({
   onChange,
   placeholder,
   autoFocus,
+  autoComplete = 'current-password',
 }: {
   value: string;
   onChange: (v: string) => void;
   placeholder: string;
   autoFocus?: boolean;
+  autoComplete?: 'current-password' | 'new-password';
 }) {
   const [shown, setShown] = useState(false);
   return (
@@ -138,6 +140,10 @@ function PasswordField({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         autoFocus={autoFocus}
+        autoComplete={autoComplete}
+        spellCheck={false}
+        autoCapitalize="off"
+        autoCorrect="off"
       />
       <button
         className={styles.reveal}
@@ -314,12 +320,14 @@ export function UnlockScreen() {
           onChange={setPassword}
           placeholder="Master password"
           autoFocus
+          autoComplete={isCreate ? 'new-password' : 'current-password'}
         />
         {isCreate && (
           <PasswordField
             value={confirm}
             onChange={setConfirm}
             placeholder="Confirm master password"
+            autoComplete="new-password"
           />
         )}
 
@@ -417,11 +425,13 @@ export function ResetPasswordScreen() {
           onChange={setPassword}
           placeholder="New master password"
           autoFocus
+          autoComplete="new-password"
         />
         <PasswordField
           value={confirm}
           onChange={setConfirm}
           placeholder="Confirm new master password"
+          autoComplete="new-password"
         />
         {(localError || authError) && <ErrorNote>{localError ?? authError}</ErrorNote>}
         <button

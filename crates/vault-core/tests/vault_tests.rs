@@ -500,7 +500,7 @@ fn changing_the_password_swaps_which_secret_opens_the_vault() {
         let key_hex = vault.key_hex();
         vault.change_password("old-pw", "new-pw").unwrap();
         // the data key is untouched by a password change
-        assert_eq!(vault.key_hex(), key_hex);
+        assert_eq!(vault.key_hex().as_str(), key_hex.as_str());
         key_hex
     };
 

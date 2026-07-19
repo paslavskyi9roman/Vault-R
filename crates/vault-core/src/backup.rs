@@ -71,6 +71,7 @@ impl Vault {
             }
         }
         fs::copy(self.blob_path(), dest)?;
+        paths::restrict_file(dest);
         Ok(())
     }
 
@@ -88,6 +89,7 @@ impl Vault {
         let dir = self.backups_dir()?;
         let dest = dir.join(timestamp_name());
         fs::copy(self.blob_path(), &dest)?;
+        paths::restrict_file(&dest);
         prune_backups(&dir, MAX_AUTOMATIC_BACKUPS)?;
         Ok(Some(dest))
     }
@@ -120,6 +122,7 @@ pub(crate) fn backup_raw_bytes(vault_dir: &Path, bytes: &[u8]) -> Result<PathBuf
     fs::create_dir_all(&dir)?;
     let dest = dir.join(timestamp_name());
     fs::write(&dest, bytes)?;
+    paths::restrict_file(&dest);
     prune_backups(&dir, MAX_AUTOMATIC_BACKUPS)?;
     Ok(dest)
 }
@@ -179,6 +182,7 @@ pub fn restore_backup_in(dir: &Path, src: &Path) -> Result<()> {
         fs::create_dir_all(&backups)?;
         let superseded = backups.join(format!("replaced-{}", timestamp_name()));
         fs::copy(&blob_path, &superseded)?;
+        paths::restrict_file(&superseded);
         prune_backups(&backups, MAX_AUTOMATIC_BACKUPS)?;
     }
 
@@ -186,6 +190,7 @@ pub fn restore_backup_in(dir: &Path, src: &Path) -> Result<()> {
     // half-written vault behind.
     let tmp = blob_path.with_extension("enc.restoring");
     fs::write(&tmp, &bytes)?;
+    paths::restrict_file(&tmp);
     fs::rename(&tmp, &blob_path)?;
 
     // A restored v2 file carries its own key metadata; a leftover v1 sidecar

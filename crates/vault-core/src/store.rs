@@ -22,6 +22,15 @@ fn new_id() -> String {
     Uuid::new_v4().to_string()
 }
 
+/// Parses a snapshot payload, mapping any deserialization failure to a generic
+/// message. The payload holds secret values, and `serde_json`'s error text can
+/// quote a fragment of the input near the point of failure — which must never
+/// be allowed to reach a log or an error toast.
+fn parse_snapshot_payload(payload: &str) -> Result<Vec<SnapshotVariable>> {
+    serde_json::from_str(payload)
+        .map_err(|_| VaultError::Crypto("snapshot payload is corrupt or unreadable".into()))
+}
+
 fn map_unique(e: rusqlite::Error, what: &str) -> VaultError {
     if let rusqlite::Error::SqliteFailure(ref inner, _) = e {
         if inner.code == rusqlite::ErrorCode::ConstraintViolation {
@@ -1365,10 +1374,10 @@ impl Vault {
         for (i, snap) in newest_first.iter().enumerate() {
             // the list is newest-first, so a snapshot's predecessor is the next element
             let before: Vec<SnapshotVariable> = match newest_first.get(i + 1) {
-                Some(prev) => serde_json::from_str(&prev.payload)?,
+                Some(prev) => parse_snapshot_payload(&prev.payload)?,
                 None => Vec::new(),
             };
-            let after: Vec<SnapshotVariable> = serde_json::from_str(&snap.payload)?;
+            let after: Vec<SnapshotVariable> = parse_snapshot_payload(&snap.payload)?;
             let rows = diff_variable_sets(&before, &after);
             out.push(SnapshotWithStats {
                 snapshot: snap.clone(),
@@ -1384,7 +1393,7 @@ impl Vault {
     /// restoring it would change (`against` = `"current"`).
     pub fn diff_snapshot(&self, snapshot_id: &str, against: &str) -> Result<Vec<DiffRow>> {
         let snap = self.snapshot_by_id(snapshot_id)?;
-        let target: Vec<SnapshotVariable> = serde_json::from_str(&snap.payload)?;
+        let target: Vec<SnapshotVariable> = parse_snapshot_payload(&snap.payload)?;
 
         let baseline: Vec<SnapshotVariable> = match against {
             "current" => self
@@ -1400,7 +1409,7 @@ impl Vault {
                 let all = self.list_snapshots(&snap.env_id)?;
                 let idx = all.iter().position(|s| s.id == snap.id);
                 match idx.and_then(|i| all.get(i + 1)) {
-                    Some(prev) => serde_json::from_str(&prev.payload)?,
+                    Some(prev) => parse_snapshot_payload(&prev.payload)?,
                     None => Vec::new(),
                 }
             }
@@ -1419,7 +1428,7 @@ impl Vault {
     /// so a linked variable still propagates to its whole group.
     pub fn restore_variable_from_snapshot(&self, snapshot_id: &str, key: &str) -> Result<()> {
         let snap = self.snapshot_by_id(snapshot_id)?;
-        let vars: Vec<SnapshotVariable> = serde_json::from_str(&snap.payload)?;
+        let vars: Vec<SnapshotVariable> = parse_snapshot_payload(&snap.payload)?;
         let wanted = vars
             .into_iter()
             .find(|v| v.key == key)
@@ -1459,7 +1468,7 @@ impl Vault {
 
         self.snapshot_env_internal(&snap.env_id, "Before restore")?;
 
-        let restored_vars: Vec<SnapshotVariable> = serde_json::from_str(&snap.payload)?;
+        let restored_vars: Vec<SnapshotVariable> = parse_snapshot_payload(&snap.payload)?;
         let now_s = now();
         let tx = self.conn.unchecked_transaction()?;
         tx.execute("DELETE FROM variables WHERE env_id = ?1", params![snap.env_id])?;

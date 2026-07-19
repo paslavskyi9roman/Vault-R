@@ -1,5 +1,7 @@
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
+import { listen } from '@tauri-apps/api/event';
 import { useVaultStore } from './store/useVaultStore';
+import { api } from './lib/api';
 import { UnlockScreen, ResetPasswordScreen, StartupErrorScreen } from './components/UnlockScreen';
 import { SettingsModal } from './components/SettingsModal';
 import { TopBar } from './components/TopBar';
@@ -20,34 +22,24 @@ import { Toast } from './components/Toast';
 import { Spinner } from './components/Spinner';
 import styles from './App.module.css';
 
-/// Locks the vault after `minutes` with no keyboard or pointer activity.
-/// 0 disables it. Activity is recorded into a ref rather than state so that
-/// moving the mouse does not re-render the whole app.
-function useIdleAutoLock(enabled: boolean, minutes: number) {
-  const lockVault = useVaultStore((s) => s.lockVault);
-  const lastActivity = useRef(Date.now());
-
+/// Throttled to 5s so mouse movement isn't a stream of IPC calls; the backend
+/// owns the actual timeout.
+function useActivityReporting(enabled: boolean) {
   useEffect(() => {
-    if (!enabled || minutes <= 0) return;
+    if (!enabled) return;
 
+    let last = 0;
     const bump = () => {
-      lastActivity.current = Date.now();
+      const now = Date.now();
+      if (now - last < 5_000) return;
+      last = now;
+      void api.notifyActivity();
     };
     const events: (keyof WindowEventMap)[] = ['mousemove', 'keydown', 'pointerdown', 'wheel'];
     events.forEach((name) => window.addEventListener(name, bump, { passive: true }));
 
-    const timeoutMs = minutes * 60_000;
-    const interval = window.setInterval(() => {
-      if (Date.now() - lastActivity.current >= timeoutMs) {
-        void lockVault();
-      }
-    }, 15_000);
-
-    return () => {
-      events.forEach((name) => window.removeEventListener(name, bump));
-      window.clearInterval(interval);
-    };
-  }, [enabled, minutes, lockVault]);
+    return () => events.forEach((name) => window.removeEventListener(name, bump));
+  }, [enabled]);
 }
 
 function App() {
@@ -55,8 +47,9 @@ function App() {
   const initError = useVaultStore((s) => s.initError);
   const locked = useVaultStore((s) => s.locked);
   const mustResetPassword = useVaultStore((s) => s.mustResetPassword);
-  const autoLockMinutes = useVaultStore((s) => s.autoLockMinutes);
   const init = useVaultStore((s) => s.init);
+  const lockVault = useVaultStore((s) => s.lockVault);
+  const onBackendLock = useVaultStore((s) => s.onBackendLock);
   const toggleCmdk = useVaultStore((s) => s.toggleCmdk);
   const closeAllOverlays = useVaultStore((s) => s.closeAllOverlays);
 
@@ -64,7 +57,29 @@ function App() {
     void init();
   }, [init]);
 
-  useIdleAutoLock(!locked, autoLockMinutes);
+  useActivityReporting(!locked);
+
+  // Reflect a backend-initiated auto-lock (idle enforcer) in the UI.
+  useEffect(() => {
+    const unlisten = listen('vault-locked', () => onBackendLock());
+    return () => void unlisten.then((off) => off());
+  }, [onBackendLock]);
+
+  // Keyed on visibility, not focus: a native file dialog steals focus
+  // without hiding the window, and locking then would abort the dialog.
+  useEffect(() => {
+    if (locked) return;
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') void lockVault();
+    };
+    const onPageHide = () => void lockVault();
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('pagehide', onPageHide);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('pagehide', onPageHide);
+    };
+  }, [locked, lockVault]);
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {

@@ -2,14 +2,64 @@ mod commands;
 mod state;
 
 use state::AppState;
+use tauri::{Emitter, Manager};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_opener::init())
+        // Must be registered first (plugin requirement). Without it, a second
+        // launch would race the same vault file instead of focusing this one.
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .manage(AppState::default())
+        .setup(|app| {
+            // No-op on Linux, which has no screen-capture-exclusion API.
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.set_content_protected(true);
+            }
+
+            // Enforced here, not in the webview, so a frozen or compromised
+            // renderer can't hold the vault open past the idle period.
+            let handle = app.handle().clone();
+            std::thread::spawn(move || loop {
+                std::thread::sleep(std::time::Duration::from_secs(10));
+                let st = handle.state::<AppState>();
+                let minutes = st
+                    .auto_lock_minutes
+                    .lock()
+                    .map(|m| *m)
+                    .unwrap_or(state::DEFAULT_AUTO_LOCK_MINUTES);
+                if minutes == 0 {
+                    continue;
+                }
+                let unlocked = st.vault.lock().map(|v| v.is_some()).unwrap_or(false);
+                if !unlocked {
+                    continue;
+                }
+                let idle = st
+                    .last_activity
+                    .lock()
+                    .ok()
+                    .and_then(|t| t.elapsed().ok())
+                    .unwrap_or_default();
+                if idle >= std::time::Duration::from_secs(minutes * 60)
+                    && commands::perform_lock(&handle).is_ok()
+                {
+                    let _ = handle.emit("vault-locked", ());
+                }
+            });
+            Ok(())
+        })
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { .. } = event {
+                let _ = commands::perform_lock(window.app_handle());
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             commands::vault_exists,
             commands::vault_status,
@@ -18,6 +68,7 @@ pub fn run() {
             commands::vault_unlock,
             commands::vault_unlock_with_recovery,
             commands::vault_lock,
+            commands::notify_activity,
             commands::vault_needs_migration,
             commands::vault_change_password,
             commands::vault_reset_password,

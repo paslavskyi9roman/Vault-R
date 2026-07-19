@@ -1,6 +1,7 @@
 use crate::state::{self, AppState};
-use tauri::State;
+use tauri::{Manager, State};
 use tauri_plugin_clipboard_manager::ClipboardExt;
+use zeroize::Zeroizing;
 use vault_core::backup::BackupInfo;
 use vault_core::gitguard::LeakReport;
 use vault_core::health::HealthReport;
@@ -45,6 +46,7 @@ pub fn vault_try_keychain(state: State<AppState>) -> Result<bool, String> {
         Ok(vault) => {
             // Best-effort: a failed rotation must never block getting in.
             let _ = vault.rotate_backup();
+            state::refresh_auto_lock(&state, &vault);
             *state.vault.lock().map_err(|_| "vault state poisoned")? = Some(vault);
             Ok(true)
         }
@@ -54,23 +56,54 @@ pub fn vault_try_keychain(state: State<AppState>) -> Result<bool, String> {
 
 #[tauri::command]
 pub fn vault_create(password: String, remember: bool, state: State<AppState>) -> Result<(), String> {
+    let password = Zeroizing::new(password);
     let vault = Vault::create(&password).map_err(stringify)?;
     if remember {
         state::remember_key(&vault.key_hex())?;
     }
+    state::refresh_auto_lock(&state, &vault);
     *state.vault.lock().map_err(|_| "vault state poisoned")? = Some(vault);
     Ok(())
 }
 
+/// Escalating delay after repeated failed unlocks, to blunt brute-forcing a
+/// running instance. Offline attacks on the file stay Argon2-bounded regardless.
+fn throttle_unlock(state: &AppState) {
+    let attempts = state.failed_attempts.lock().map(|a| *a).unwrap_or(0);
+    if attempts >= 3 {
+        let secs = std::cmp::min(1u64 << (attempts - 3).min(5), 30);
+        std::thread::sleep(std::time::Duration::from_secs(secs));
+    }
+}
+
+fn record_unlock(state: &AppState, ok: bool) {
+    if let Ok(mut a) = state.failed_attempts.lock() {
+        *a = if ok { 0 } else { a.saturating_add(1) };
+    }
+    if let Ok(mut t) = state.last_attempt.lock() {
+        *t = Some(std::time::SystemTime::now());
+    }
+}
+
 #[tauri::command]
 pub fn vault_unlock(password: String, remember: bool, state: State<AppState>) -> Result<(), String> {
-    let vault = Vault::open(&password).map_err(stringify)?;
+    let password = Zeroizing::new(password);
+    throttle_unlock(&state);
+    let vault = match Vault::open(&password) {
+        Ok(v) => v,
+        Err(e) => {
+            record_unlock(&state, false);
+            return Err(stringify(e));
+        }
+    };
+    record_unlock(&state, true);
     let _ = vault.rotate_backup();
     if remember {
         state::remember_key(&vault.key_hex())?;
     } else {
         state::forget_key();
     }
+    state::refresh_auto_lock(&state, &vault);
     *state.vault.lock().map_err(|_| "vault state poisoned")? = Some(vault);
     Ok(())
 }
@@ -80,15 +113,25 @@ pub fn vault_unlock(password: String, remember: bool, state: State<AppState>) ->
 /// unknown is not usable for long.
 #[tauri::command]
 pub fn vault_unlock_with_recovery(code: String, state: State<AppState>) -> Result<(), String> {
-    let vault = Vault::open_with_recovery(&code).map_err(stringify)?;
+    let code = Zeroizing::new(code);
+    throttle_unlock(&state);
+    let vault = match Vault::open_with_recovery(&code) {
+        Ok(v) => v,
+        Err(e) => {
+            record_unlock(&state, false);
+            return Err(stringify(e));
+        }
+    };
+    record_unlock(&state, true);
     let _ = vault.rotate_backup();
+    state::refresh_auto_lock(&state, &vault);
     *state.vault.lock().map_err(|_| "vault state poisoned")? = Some(vault);
     Ok(())
 }
 
-#[tauri::command]
-pub fn vault_lock(app: tauri::AppHandle, state: State<AppState>) -> Result<(), String> {
-    // Reclaim a secret still sitting on the clipboard from before the lock.
+/// Shared by `vault_lock`, the idle auto-lock enforcer, and window-close.
+pub fn perform_lock(app: &tauri::AppHandle) -> Result<(), String> {
+    let state = app.state::<AppState>();
     if let Ok(mut last) = state.last_copied.lock() {
         if let Some(copied) = last.take() {
             if let Ok(current) = app.clipboard().read_text() {
@@ -97,6 +140,10 @@ pub fn vault_lock(app: tauri::AppHandle, state: State<AppState>) -> Result<(), S
                 }
             }
         }
+    }
+    // Drop (and zeroize) any recovery code still staged for a save.
+    if let Ok(mut pending) = state.pending_recovery_code.lock() {
+        *pending = None;
     }
     let taken = state
         .vault
@@ -107,6 +154,18 @@ pub fn vault_lock(app: tauri::AppHandle, state: State<AppState>) -> Result<(), S
         vault.lock().map_err(stringify)?;
     }
     Ok(())
+}
+
+#[tauri::command]
+pub fn vault_lock(app: tauri::AppHandle) -> Result<(), String> {
+    perform_lock(&app)
+}
+
+/// The webview only reports activity; the enforcer in `run` owns the timeout,
+/// so a frozen or compromised renderer can't keep the vault open.
+#[tauri::command]
+pub fn notify_activity(state: State<AppState>) {
+    state::touch_activity(&state);
 }
 
 /// Whether the open vault is still in the legacy on-disk format, which blocks
@@ -127,6 +186,8 @@ pub fn vault_change_password(
     remember: bool,
     state: State<AppState>,
 ) -> Result<(), String> {
+    let current_password = Zeroizing::new(current_password);
+    let new_password = Zeroizing::new(new_password);
     state::with_vault(&state, |v| v.rotate_backup().map(|_| ()))?;
     state::with_vault_mut(&state, |v| v.change_password(&current_password, &new_password))?;
     // The keychain holds the data key, which a password change does not alter,
@@ -144,6 +205,7 @@ pub fn vault_change_password(
 /// old one is not available.
 #[tauri::command]
 pub fn vault_reset_password(new_password: String, state: State<AppState>) -> Result<(), String> {
+    let new_password = Zeroizing::new(new_password);
     state::with_vault_mut(&state, |v| v.reset_password(&new_password))
 }
 
@@ -158,27 +220,47 @@ pub fn vault_has_recovery_code(state: State<AppState>) -> Result<bool, String> {
 #[tauri::command]
 pub fn vault_generate_recovery_code(state: State<AppState>) -> Result<String, String> {
     state::with_vault(&state, |v| v.rotate_backup().map(|_| ()))?;
-    state::with_vault_mut(&state, |v| v.generate_recovery_code())
+    let code = state::with_vault_mut(&state, |v| v.generate_recovery_code())?;
+    // Staged so an injected script can't substitute its own code on save.
+    if let Ok(mut pending) = state.pending_recovery_code.lock() {
+        *pending = Some(Zeroizing::new(code.clone()));
+    }
+    Ok(code)
 }
 
 // ---------------------------------------------------------------------
 // Backups
 // ---------------------------------------------------------------------
 
-/// Writes the printable recovery kit to a path the user picked. The wording
-/// lives here rather than in the frontend so the warnings cannot drift.
+/// Writes the recovery kit from the staged copy in `AppState`, never from an
+/// IPC argument — see `vault_generate_recovery_code`.
 #[tauri::command]
-pub fn save_recovery_kit(path: String, code: String) -> Result<(), String> {
-    let body = format!(
+pub fn save_recovery_kit(path: String, state: State<AppState>) -> Result<(), String> {
+    if state
+        .vault
+        .lock()
+        .map_err(|_| "vault state poisoned".to_string())?
+        .is_none()
+    {
+        return Err("vault is locked".into());
+    }
+    let code = state
+        .pending_recovery_code
+        .lock()
+        .map_err(|_| "vault state poisoned".to_string())?
+        .clone()
+        .ok_or_else(|| "generate a recovery code first".to_string())?;
+    let body = Zeroizing::new(format!(
         "Vault-R recovery kit\n\
          \n\
-         Recovery code: {code}\n\
+         Recovery code: {}\n\
          \n\
          This code unlocks your vault without the master password.\n\
          Keep it somewhere safe and offline: anyone holding it can read every\n\
-         secret in the vault. Generating a new recovery kit invalidates this code.\n"
-    );
-    std::fs::write(&path, body).map_err(|e| e.to_string())
+         secret in the vault. Generating a new recovery kit invalidates this code.\n",
+        &*code
+    ));
+    std::fs::write(&path, body.as_bytes()).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -504,7 +586,16 @@ pub fn get_meta(key: String, state: State<AppState>) -> Result<Option<String>, S
 
 #[tauri::command]
 pub fn set_meta(key: String, value: String, state: State<AppState>) -> Result<(), String> {
-    state::with_vault(&state, |v| v.set_meta(&key, &value))
+    state::with_vault(&state, |v| v.set_meta(&key, &value))?;
+    // Keep the idle auto-lock enforcer in step with a settings change.
+    if key == state::AUTO_LOCK_META_KEY {
+        if let Ok(minutes) = value.parse::<u64>() {
+            if let Ok(mut m) = state.auto_lock_minutes.lock() {
+                *m = minutes;
+            }
+        }
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------
@@ -549,7 +640,20 @@ pub fn scan_directory(path: String, state: State<AppState>) -> Result<LeakReport
 /// commits; it does not untrack anything already committed, which is why the
 /// findings that need rotation say so themselves.
 #[tauri::command]
-pub fn apply_gitignore_patterns(git_root: String, patterns: Vec<String>) -> Result<usize, String> {
+pub fn apply_gitignore_patterns(
+    git_root: String,
+    patterns: Vec<String>,
+    state: State<AppState>,
+) -> Result<usize, String> {
+    // Only makes sense as a follow-up to an unlocked-vault safety scan.
+    if state
+        .vault
+        .lock()
+        .map_err(|_| "vault state poisoned".to_string())?
+        .is_none()
+    {
+        return Err("vault is locked".into());
+    }
     vault_core::gitguard::apply_gitignore_patterns(std::path::Path::new(&git_root), &patterns)
         .map_err(stringify)
 }

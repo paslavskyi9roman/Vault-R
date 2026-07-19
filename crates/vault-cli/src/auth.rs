@@ -1,5 +1,6 @@
 use vault_core::error::{Result, VaultError};
 use vault_core::Vault;
+use zeroize::Zeroizing;
 
 const SERVICE: &str = "vault-r";
 const ACCOUNT: &str = "master-key";
@@ -15,15 +16,26 @@ pub fn unlock() -> Result<Vault> {
 
     if let Ok(entry) = keyring::Entry::new(SERVICE, ACCOUNT) {
         if let Ok(key_hex) = entry.get_password() {
+            let key_hex = Zeroizing::new(key_hex);
             if let Ok(vault) = Vault::open_with_key(&key_hex) {
                 return Ok(vault);
             }
         }
     }
 
-    let password =
-        rpassword::prompt_password("Master password: ").map_err(|e| VaultError::Crypto(e.to_string()))?;
+    let password = Zeroizing::new(
+        rpassword::prompt_password("Master password: ")
+            .map_err(|e| VaultError::Crypto(e.to_string()))?,
+    );
     Vault::open(&password)
+}
+
+/// Idempotent — forgetting when there is nothing stored is not an error.
+pub fn forget() -> Result<()> {
+    if let Ok(entry) = keyring::Entry::new(SERVICE, ACCOUNT) {
+        let _ = entry.delete_password();
+    }
+    Ok(())
 }
 
 /// Creates a brand-new vault, prompting twice for the master password.
@@ -34,11 +46,15 @@ pub fn init(remember: bool) -> Result<Vault> {
         )));
     }
 
-    let password = rpassword::prompt_password("New master password: ")
-        .map_err(|e| VaultError::Crypto(e.to_string()))?;
-    let confirm = rpassword::prompt_password("Confirm master password: ")
-        .map_err(|e| VaultError::Crypto(e.to_string()))?;
-    if password != confirm {
+    let password = Zeroizing::new(
+        rpassword::prompt_password("New master password: ")
+            .map_err(|e| VaultError::Crypto(e.to_string()))?,
+    );
+    let confirm = Zeroizing::new(
+        rpassword::prompt_password("Confirm master password: ")
+            .map_err(|e| VaultError::Crypto(e.to_string()))?,
+    );
+    if *password != *confirm {
         return Err(VaultError::InvalidInput("passwords do not match".into()));
     }
 

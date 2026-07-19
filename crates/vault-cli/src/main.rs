@@ -4,6 +4,7 @@ mod target;
 
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
+use zeroize::Zeroizing;
 
 #[derive(Parser)]
 #[command(name = "vault", about = "Vault-R: a developer-first secrets and .env vault", version)]
@@ -132,6 +133,8 @@ enum Command {
     },
     /// Change the master password
     Passwd,
+    /// Forget the data key remembered on this device (undoes `init --remember`)
+    Forget,
     /// Manage the recovery kit
     Recovery {
         #[command(subcommand)]
@@ -504,14 +507,19 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
         Command::Passwd => {
             let mut vault = auth::unlock()?;
-            let current = rpassword::prompt_password("Current master password: ")?;
-            let new = rpassword::prompt_password("New master password: ")?;
-            let confirmation = rpassword::prompt_password("Confirm new master password: ")?;
-            if new != confirmation {
+            let current = Zeroizing::new(rpassword::prompt_password("Current master password: ")?);
+            let new = Zeroizing::new(rpassword::prompt_password("New master password: ")?);
+            let confirmation =
+                Zeroizing::new(rpassword::prompt_password("Confirm new master password: ")?);
+            if *new != *confirmation {
                 return Err("passwords do not match".into());
             }
             vault.change_password(&current, &new)?;
             println!("Master password changed.");
+        }
+        Command::Forget => {
+            auth::forget()?;
+            println!("Forgot the remembered key. The next command will ask for the master password.");
         }
         Command::Recovery { command } => match command {
             RecoveryCommand::Status => {
@@ -528,12 +536,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             RecoveryCommand::Unlock => {
-                let code = rpassword::prompt_password("Recovery code: ")?;
+                let code = Zeroizing::new(rpassword::prompt_password("Recovery code: ")?);
                 let mut vault = vault_core::Vault::open_with_recovery(&code)?;
                 println!("Recovery code accepted. Choose a new master password.");
-                let new = rpassword::prompt_password("New master password: ")?;
-                let confirmation = rpassword::prompt_password("Confirm new master password: ")?;
-                if new != confirmation {
+                let new = Zeroizing::new(rpassword::prompt_password("New master password: ")?);
+                let confirmation =
+                    Zeroizing::new(rpassword::prompt_password("Confirm new master password: ")?);
+                if *new != *confirmation {
                     return Err("passwords do not match".into());
                 }
                 vault.reset_password(&new)?;

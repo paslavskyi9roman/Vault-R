@@ -200,6 +200,9 @@ interface VaultState {
   createVault: (password: string, remember: boolean) => Promise<void>;
   unlockVault: (password: string, remember: boolean) => Promise<void>;
   lockVault: () => Promise<void>;
+  /// Applies the locked UI state when the backend auto-lock enforcer has
+  /// already locked the vault (so it must not call `vault_lock` again).
+  onBackendLock: () => void;
 
   refreshRepos: () => Promise<void>;
   refreshVariables: () => Promise<void>;
@@ -525,25 +528,10 @@ export const useVaultStore = create<VaultState>((set, get) => ({
 
   lockVault: async () => {
     await api.vaultLock();
-    set({
-      locked: true,
-      repos: [],
-      variables: [],
-      projects: [],
-      activeRepoId: null,
-      activeEnvId: null,
-      revealed: {},
-      // Every session-scoped concession resets: a fresh unlock warns again.
-      protectedAcknowledged: {},
-      settingsOpen: false,
-      historyOpen: false,
-      recoveryCodeOnce: null,
-      confirm: null,
-      pwCurrent: '',
-      pwNew: '',
-      pwConfirm: '',
-    });
+    set(lockedState());
   },
+
+  onBackendLock: () => set(lockedState()),
 
   refreshRepos: async () => {
     const repos = await api.listRepoSummaries();
@@ -1210,7 +1198,7 @@ export const useVaultStore = create<VaultState>((set, get) => ({
     try {
       const path = await save({ defaultPath: 'vault-r-recovery-kit.txt' });
       if (!path) return;
-      await api.saveRecoveryKit(path, code);
+      await api.saveRecoveryKit(path);
       get().showToast('Recovery kit saved');
     } catch (e) {
       get().showToast(String(e));
@@ -1629,6 +1617,56 @@ export const useVaultStore = create<VaultState>((set, get) => ({
       confirmInput: s.confirmBusy ? s.confirmInput : '',
     })),
 }));
+
+/// Also clears the Compare/History/link/import/command-palette caches and
+/// closes their overlays — left open, they'd resurface old secrets after
+/// the next unlock.
+function lockedState(): Partial<VaultState> {
+  return {
+    locked: true,
+    repos: [],
+    variables: [],
+    projects: [],
+    activeRepoId: null,
+    activeEnvId: null,
+    revealed: {},
+    // Every session-scoped concession resets: a fresh unlock warns again.
+    protectedAcknowledged: {},
+    recoveryCodeOnce: null,
+    confirm: null,
+    pwCurrent: '',
+    pwNew: '',
+    pwConfirm: '',
+    historySnapshots: [],
+    snapshotDiff: [],
+    compareRows: [],
+    compareUnlinkedMatches: [],
+    linkCandidates: [],
+    groupPopoverMembers: [],
+    newVarValue: '',
+    importText: '',
+    cmdkResults: [],
+    cmdkQuery: '',
+    settingsOpen: false,
+    historyOpen: false,
+    expandedSnapshotId: null,
+    diffRevealed: {},
+    compareOpen: false,
+    compareEnvBId: null,
+    compareRevealed: {},
+    importOpen: false,
+    shareOpen: false,
+    linkModalOpen: false,
+    linkModalVarId: null,
+    linkModalKey: '',
+    linkSelected: {},
+    groupPopoverGroupId: null,
+    generatorOpen: false,
+    generatorTarget: null,
+    safetyOpen: false,
+    cmdkOpen: false,
+  };
+}
 
 async function afterUnlock(get: () => VaultState) {
   await get().refreshRepos();
