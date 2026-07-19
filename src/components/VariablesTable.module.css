@@ -63,20 +63,24 @@
 
 .colKey {
   width: 24%;
+  flex-shrink: 0;
   padding-right: 10px;
 }
 
 .colValue {
-  width: 42%;
+  flex: 1 1 auto;
+  min-width: 0;
   padding-right: 10px;
 }
 
 .colLinked {
-  width: 16%;
+  width: 110px;
+  flex-shrink: 0;
 }
 
 .colActions {
-  width: 16%;
+  width: 260px;
+  flex-shrink: 0;
   display: flex;
   gap: var(--space-2);
   justify-content: flex-end;
