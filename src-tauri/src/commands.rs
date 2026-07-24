@@ -258,7 +258,7 @@ pub fn save_recovery_kit(path: String, state: State<AppState>) -> Result<(), Str
          This code unlocks your vault without the master password.\n\
          Keep it somewhere safe and offline: anyone holding it can read every\n\
          secret in the vault. Generating a new recovery kit invalidates this code.\n",
-        &*code
+        *code
     ));
     std::fs::write(&path, body.as_bytes()).map_err(|e| e.to_string())
 }
