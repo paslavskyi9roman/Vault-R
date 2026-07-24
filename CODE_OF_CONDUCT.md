@@ -56,10 +56,10 @@ an individual is officially representing the community in public spaces.
 ## Enforcement
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
-reported to the maintainers by contacting them at the address listed on the
-maintainer's GitHub profile, or by opening a private report through the
-repository's **Security** tab. All complaints will be reviewed and investigated
-promptly and fairly.
+reported privately by opening a report through the repository's **Security**
+tab — the same private channel used for security reports, and visible only to
+the maintainers. All complaints will be reviewed and investigated promptly and
+fairly.
 
 All community leaders are obligated to respect the privacy and security of the
 reporter of any incident.
