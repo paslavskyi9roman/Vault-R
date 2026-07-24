@@ -110,6 +110,7 @@ pub fn run() {
             commands::import_env_text,
             commands::export_env_text,
             commands::export_env_to_file,
+            commands::read_dropped_file,
             commands::list_snapshots,
             commands::list_snapshots_with_stats,
             commands::diff_snapshot,

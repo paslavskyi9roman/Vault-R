@@ -1,6 +1,6 @@
-import { useState, type DragEvent } from 'react';
 import { useVaultStore } from '../store/useVaultStore';
 import { usePresence } from '../lib/usePresence';
+import { useFileDrop } from '../lib/useFileDrop';
 import { CloseIcon } from './icons';
 
 export function ImportModal() {
@@ -12,24 +12,15 @@ export function ImportModal() {
   const repos = useVaultStore((s) => s.repos);
   const activeRepoId = useVaultStore((s) => s.activeRepoId);
   const activeEnvId = useVaultStore((s) => s.activeEnvId);
+  const showToast = useVaultStore((s) => s.showToast);
 
-  const [dragging, setDragging] = useState(false);
   const { mounted, state } = usePresence(importOpen, 120);
+  const { zoneRef, dragging, dropHandlers } = useFileDrop(importOpen, setImportText, showToast);
 
   if (!mounted) return null;
 
   const activeRepo = repos.find((r) => r.id === activeRepoId);
   const activeEnv = activeRepo?.envs.find((e) => e.id === activeEnvId);
-
-  function onDrop(e: DragEvent<HTMLDivElement>) {
-    e.preventDefault();
-    setDragging(false);
-    const file = e.dataTransfer.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => setImportText(String(reader.result ?? ''));
-    reader.readAsText(file);
-  }
 
   return (
     <>
@@ -45,16 +36,7 @@ export function ImportModal() {
           <div className="v-modal-sub">
             Into {activeRepo && activeEnv ? `${activeRepo.name} / ${activeEnv.name}` : 'the active environment'}
           </div>
-          <div
-            className="v-dropzone"
-            data-dragging={dragging}
-            onDragOver={(e) => {
-              e.preventDefault();
-              setDragging(true);
-            }}
-            onDragLeave={() => setDragging(false)}
-            onDrop={onDrop}
-          >
+          <div ref={zoneRef} className="v-dropzone" data-dragging={dragging} {...dropHandlers}>
             <div className="v-dropzone-text">Drag &amp; drop a .env file here</div>
           </div>
           <div className="v-or">or paste below</div>

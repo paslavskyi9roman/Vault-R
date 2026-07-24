@@ -261,6 +261,7 @@ export const api = {
   exportEnvText: (envId: string) => invoke<string>('export_env_text', { envId }),
   exportEnvToFile: (envId: string, path: string) =>
     invoke<void>('export_env_to_file', { envId, path }),
+  readDroppedFile: (path: string) => invoke<string>('read_dropped_file', { path }),
 
   listSnapshots: (envId: string) => invoke<Snapshot[]>('list_snapshots', { envId }),
   listSnapshotsWithStats: (envId: string) =>
