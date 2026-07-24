@@ -1,0 +1,7 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/paslavskyi9roman/Vault-R/security/advisories/new
+    about: >
+      Please report vulnerabilities privately, never as a public issue. See
+      SECURITY.md for scope.
