@@ -77,14 +77,6 @@ pub struct Snapshot {
     pub payload: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Member {
-    pub id: String,
-    pub email: String,
-    pub role: String,
-}
-
 /// One entry in a link group: the variable plus which repo/env it lives in,
 /// used to render "same key in other repos/envs" pickers and group popovers.
 #[derive(Debug, Clone, Serialize, Deserialize)]

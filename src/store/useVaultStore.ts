@@ -9,7 +9,6 @@ import {
   type GroupMember,
   type HealthReport,
   type LeakReport,
-  type Member,
   type ProjectInfo,
   type RepoSummary,
   type SearchResult,
@@ -107,11 +106,6 @@ interface VaultState {
   // ---- import modal ----
   importOpen: boolean;
   importText: string;
-
-  // ---- share modal ----
-  shareOpen: boolean;
-  members: Member[];
-  inviteEmail: string;
 
   // ---- history slideover ----
   historyOpen: boolean;
@@ -294,12 +288,6 @@ interface VaultState {
   resetPasswordAfterRecovery: (newPassword: string) => Promise<void>;
   restoreBackupFromUnlock: () => Promise<void>;
 
-  openShare: () => Promise<void>;
-  closeShare: () => void;
-  setInviteEmail: (v: string) => void;
-  addMemberAction: () => Promise<void>;
-  removeMemberAction: (id: string) => Promise<void>;
-
   toggleCmdk: () => void;
   closeCmdk: () => void;
   setCmdkQuery: (q: string) => Promise<void>;
@@ -395,10 +383,6 @@ export const useVaultStore = create<VaultState>((set, get) => ({
 
   importOpen: false,
   importText: '',
-
-  shareOpen: false,
-  members: [],
-  inviteEmail: '',
 
   historyOpen: false,
   historySnapshots: [],
@@ -1286,31 +1270,6 @@ export const useVaultStore = create<VaultState>((set, get) => ({
     }
   },
 
-  openShare: async () => {
-    set({ shareOpen: true });
-    const members = await api.listMembers();
-    set({ members });
-  },
-  closeShare: () => set({ shareOpen: false }),
-  setInviteEmail: (v) => set({ inviteEmail: v }),
-  addMemberAction: async () => {
-    const email = get().inviteEmail.trim();
-    if (!email) return;
-    try {
-      await api.addMember(email, 'Editor');
-      set({ inviteEmail: '' });
-      const members = await api.listMembers();
-      set({ members });
-    } catch (e) {
-      get().showToast(String(e));
-    }
-  },
-  removeMemberAction: async (id) => {
-    await api.removeMember(id);
-    const members = await api.listMembers();
-    set({ members });
-  },
-
   toggleCmdk: () => set((s) => ({ cmdkOpen: !s.cmdkOpen, cmdkQuery: '', cmdkResults: [] })),
   closeCmdk: () => set({ cmdkOpen: false }),
   setCmdkQuery: async (q) => {
@@ -1603,7 +1562,6 @@ export const useVaultStore = create<VaultState>((set, get) => ({
     set((s) => ({
       cmdkOpen: false,
       importOpen: false,
-      shareOpen: false,
       historyOpen: false,
       linkModalOpen: false,
       groupPopoverGroupId: null,
@@ -1655,7 +1613,6 @@ function lockedState(): Partial<VaultState> {
     compareEnvBId: null,
     compareRevealed: {},
     importOpen: false,
-    shareOpen: false,
     linkModalOpen: false,
     linkModalVarId: null,
     linkModalKey: '',

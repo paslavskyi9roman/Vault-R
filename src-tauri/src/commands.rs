@@ -6,7 +6,7 @@ use vault_core::backup::BackupInfo;
 use vault_core::gitguard::LeakReport;
 use vault_core::health::HealthReport;
 use vault_core::models::{
-    DiffRow, Environment, GroupMember, Member, ProjectInfo, Repo, RepoSummary, SearchResult,
+    DiffRow, Environment, GroupMember, ProjectInfo, Repo, RepoSummary, SearchResult,
     Snapshot, SnapshotWithStats, UnlinkedMatch, Variable, VariableWithUsage,
 };
 use vault_core::{Vault, VaultStatus};
@@ -554,25 +554,6 @@ pub fn restore_variable_from_snapshot(
 #[tauri::command]
 pub fn restore_snapshot(snapshot_id: String, state: State<AppState>) -> Result<(), String> {
     state::with_vault(&state, |v| v.restore_snapshot(&snapshot_id))
-}
-
-// ---------------------------------------------------------------------
-// Members (local-only mock of the Share modal)
-// ---------------------------------------------------------------------
-
-#[tauri::command]
-pub fn list_members(state: State<AppState>) -> Result<Vec<Member>, String> {
-    state::with_vault(&state, |v| v.list_members())
-}
-
-#[tauri::command]
-pub fn add_member(email: String, role: String, state: State<AppState>) -> Result<Member, String> {
-    state::with_vault(&state, |v| v.add_member(&email, &role))
-}
-
-#[tauri::command]
-pub fn remove_member(id: String, state: State<AppState>) -> Result<(), String> {
-    state::with_vault(&state, |v| v.remove_member(&id))
 }
 
 // ---------------------------------------------------------------------

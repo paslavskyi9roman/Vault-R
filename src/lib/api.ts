@@ -49,12 +49,6 @@ export interface Snapshot {
   payload: string;
 }
 
-export interface Member {
-  id: string;
-  email: string;
-  role: string;
-}
-
 export interface GroupMember {
   variable: Variable;
   repoName: string;
@@ -270,10 +264,6 @@ export const api = {
   restoreVariableFromSnapshot: (snapshotId: string, key: string) =>
     invoke<void>('restore_variable_from_snapshot', { snapshotId, key }),
   restoreSnapshot: (snapshotId: string) => invoke<void>('restore_snapshot', { snapshotId }),
-
-  listMembers: () => invoke<Member[]>('list_members'),
-  addMember: (email: string, role: string) => invoke<Member>('add_member', { email, role }),
-  removeMember: (id: string) => invoke<void>('remove_member', { id }),
 
   getMeta: (key: string) => invoke<string | null>('get_meta', { key }),
   setMeta: (key: string, value: string) => invoke<void>('set_meta', { key, value }),

@@ -2,7 +2,7 @@ use crate::db::Vault;
 use crate::dotenv::{parse_env_text, serialize_env};
 use crate::error::{Result, VaultError};
 use crate::models::{
-    DiffRow, Environment, EnvironmentSummary, GroupMember, Member, Project, ProjectInfo, Repo,
+    DiffRow, Environment, EnvironmentSummary, GroupMember, Project, ProjectInfo, Repo,
     RepoSummary, SearchResult, Snapshot, SnapshotVariable, SnapshotWithStats, UnlinkedMatch,
     Variable, VariableWithUsage,
 };
@@ -1483,52 +1483,6 @@ impl Vault {
         tx.commit()?;
 
         self.snapshot_env_internal(&snap.env_id, &format!("Restored snapshot from {}", snap.created_at))?;
-        self.persist()?;
-        Ok(())
-    }
-
-    // ---------------------------------------------------------------
-    // Members (local-only mock of the Share modal)
-    // ---------------------------------------------------------------
-
-    pub fn list_members(&self) -> Result<Vec<Member>> {
-        let mut stmt = self.conn.prepare("SELECT id, email, role FROM members ORDER BY email")?;
-        let rows = stmt.query_map([], |r| {
-            Ok(Member {
-                id: r.get(0)?,
-                email: r.get(1)?,
-                role: r.get(2)?,
-            })
-        })?;
-        let mut out = Vec::new();
-        for r in rows {
-            out.push(r?);
-        }
-        Ok(out)
-    }
-
-    pub fn add_member(&self, email: &str, role: &str) -> Result<Member> {
-        let email = email.trim();
-        if email.is_empty() {
-            return Err(VaultError::InvalidInput("email must not be empty".into()));
-        }
-        let id = new_id();
-        self.conn
-            .execute(
-                "INSERT INTO members (id, email, role) VALUES (?1, ?2, ?3)",
-                params![id, email, role],
-            )
-            .map_err(|e| map_unique(e, "member"))?;
-        self.persist()?;
-        Ok(Member {
-            id,
-            email: email.to_string(),
-            role: role.to_string(),
-        })
-    }
-
-    pub fn remove_member(&self, id: &str) -> Result<()> {
-        self.conn.execute("DELETE FROM members WHERE id = ?1", params![id])?;
         self.persist()?;
         Ok(())
     }
