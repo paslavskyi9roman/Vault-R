@@ -217,6 +217,7 @@ substitute for.
 cargo test --workspace   # vault-core + vault-cli tests
 cargo clippy --workspace --all-targets -- -D warnings
 npx tsc --noEmit
+npm run build
 ```
 
 The leak-guard tests build real git repositories in temp directories, so `git` must be on your
