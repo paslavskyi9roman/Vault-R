@@ -205,7 +205,7 @@ fn configure_connection(conn: &Connection) -> Result<()> {
 /// `PRAGMA user_version` rather than a bootstrap table -- it lives inside the
 /// database image itself, so it travels with the encrypted blob and with
 /// every backup for free.
-const SCHEMA_VERSION: i32 = 4;
+const SCHEMA_VERSION: i32 = 5;
 
 /// One ordered step in the schema's history. `noop` marks a step guaranteed
 /// not to alter existing data (e.g. `CREATE TABLE IF NOT EXISTS` against
@@ -302,6 +302,17 @@ const MIGRATIONS: &[Migration] = &[Migration {
     noop: false,
     sql: r#"
         ALTER TABLE variables ADD COLUMN rotate_after_days INTEGER;
+        "#,
+}, Migration {
+    // The team-sharing feature this table backed never did anything across a
+    // network -- it was a local list of email addresses -- and it is gone.
+    // Migration 1 stays as it shipped, so the table is dropped here instead:
+    // rows are destroyed (nobody's secrets, but still data), hence not `noop`,
+    // which earns the usual pre-migration backup.
+    version: 5,
+    noop: false,
+    sql: r#"
+        DROP TABLE IF EXISTS members;
         "#,
 }];
 
@@ -785,6 +796,22 @@ mod migration_tests {
             )
             .unwrap();
         assert_eq!(table_count, 1);
+    }
+
+    #[test]
+    fn the_members_table_does_not_survive_migration() {
+        let conn = Connection::open_in_memory().unwrap();
+        // migration 1 creates it, migration 5 drops it -- a vault created
+        // today must not carry the removed feature's table either
+        migrate(&conn).unwrap();
+        let table_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'members'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(table_count, 0);
     }
 
     #[test]

@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { getVersion } from '@tauri-apps/api/app';
 import { useVaultStore } from '../store/useVaultStore';
 import { usePresence } from '../lib/usePresence';
 import { Spinner } from './Spinner';
@@ -41,6 +42,7 @@ export function SettingsModal() {
           <AutoLockSection />
           <BackupSection />
           <PasswordSection />
+          <AboutFooter />
         </div>
       </div>
     </>
@@ -55,6 +57,18 @@ function MigrationNotice() {
       that.
     </div>
   );
+}
+
+// Bug reports ask for a version, so there has to be somewhere to read one
+// without dropping to the CLI for `vault --version`.
+function AboutFooter() {
+  const [version, setVersion] = useState<string | null>(null);
+
+  useEffect(() => {
+    void getVersion().then(setVersion, () => setVersion(null));
+  }, []);
+
+  return <div className={styles.about}>Vault-R{version ? ` v${version}` : ''}</div>;
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {

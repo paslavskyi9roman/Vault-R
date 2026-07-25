@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Vault-R: a developer-first secrets and .env vault"
 authors = ["Roman"]
 edition = "2021"
+license = "MIT OR Apache-2.0"
 
 [lib]
 name = "vault_r_lib"

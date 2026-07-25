@@ -7,7 +7,6 @@ const isMac = navigator.platform.toLowerCase().includes('mac');
 export function TopBar() {
   const toggleCmdk = useVaultStore((s) => s.toggleCmdk);
   const openImport = useVaultStore((s) => s.openImport);
-  const openShare = useVaultStore((s) => s.openShare);
   const exportEnv = useVaultStore((s) => s.exportEnv);
   const replayOnboarding = useVaultStore((s) => s.replayOnboarding);
   const lockVault = useVaultStore((s) => s.lockVault);
@@ -45,9 +44,6 @@ export function TopBar() {
         </button>
         <button className="v-btn" onClick={openImport}>
           Import
-        </button>
-        <button className="v-btn" onClick={openShare}>
-          Share
         </button>
         <button className="v-btn v-btn--primary" onClick={() => void exportEnv()}>
           Export .env

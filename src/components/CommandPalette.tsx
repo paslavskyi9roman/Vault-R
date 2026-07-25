@@ -18,7 +18,6 @@ export function CommandPalette() {
   const openImport = useVaultStore((s) => s.openImport);
   const exportEnv = useVaultStore((s) => s.exportEnv);
   const openHistory = useVaultStore((s) => s.openHistory);
-  const openShare = useVaultStore((s) => s.openShare);
 
   // Shorter than the other overlays: this one gets dismissed constantly and
   // any lag on the way out reads as sluggish.
@@ -29,7 +28,6 @@ export function CommandPalette() {
     { id: 'a1', label: 'Import .env file', run: () => { closeCmdk(); openImport(); } },
     { id: 'a2', label: 'Export current .env', run: () => { closeCmdk(); void exportEnv(); } },
     { id: 'a3', label: 'View version history', run: () => { closeCmdk(); void openHistory(); } },
-    { id: 'a4', label: 'Manage team access', run: () => { closeCmdk(); void openShare(); } },
   ];
 
   const showingQuickActions = !cmdkQuery.trim();

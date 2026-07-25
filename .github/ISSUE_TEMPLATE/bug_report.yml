@@ -1,0 +1,62 @@
+name: Bug report
+description: Something in Vault-R does not behave the way it should
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Never paste a real secret value into an issue.** Key names, file
+        paths and line numbers are enough — and if you have already pasted a
+        live credential anywhere public, rotate it now.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you expect, and what did you get instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Create a repo/environment with …
+        2. Run `vault …`
+        3. Observe …
+    validations:
+      required: true
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where did this happen?
+      options:
+        - Desktop app (GUI)
+        - CLI (`vault`)
+        - Both
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Vault-R version
+      description: "`vault --version`, or the line at the bottom of the Settings dialog."
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: macOS 15.3 / Windows 11 / Ubuntu 24.04
+    validations:
+      required: true
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Error output, screenshots, or relevant context. Redact values.
