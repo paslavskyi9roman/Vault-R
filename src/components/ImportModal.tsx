@@ -1,6 +1,6 @@
-import { useState, type DragEvent } from 'react';
 import { useVaultStore } from '../store/useVaultStore';
 import { usePresence } from '../lib/usePresence';
+import { useFileDrop } from '../lib/useFileDrop';
 import { CloseIcon } from './icons';
 
 export function ImportModal() {
@@ -12,24 +12,22 @@ export function ImportModal() {
   const repos = useVaultStore((s) => s.repos);
   const activeRepoId = useVaultStore((s) => s.activeRepoId);
   const activeEnvId = useVaultStore((s) => s.activeEnvId);
+  const showToast = useVaultStore((s) => s.showToast);
+  const onboarding = useVaultStore((s) => s.onboarding);
 
-  const [dragging, setDragging] = useState(false);
   const { mounted, state } = usePresence(importOpen, 120);
+  /// Onboarding renders over this one and has its own dropzone; only one of
+  /// them may claim window-wide drops at a time.
+  const { dragging, dropHandlers } = useFileDrop(
+    importOpen && !onboarding,
+    setImportText,
+    showToast,
+  );
 
   if (!mounted) return null;
 
   const activeRepo = repos.find((r) => r.id === activeRepoId);
   const activeEnv = activeRepo?.envs.find((e) => e.id === activeEnvId);
-
-  function onDrop(e: DragEvent<HTMLDivElement>) {
-    e.preventDefault();
-    setDragging(false);
-    const file = e.dataTransfer.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => setImportText(String(reader.result ?? ''));
-    reader.readAsText(file);
-  }
 
   return (
     <>
@@ -45,17 +43,10 @@ export function ImportModal() {
           <div className="v-modal-sub">
             Into {activeRepo && activeEnv ? `${activeRepo.name} / ${activeEnv.name}` : 'the active environment'}
           </div>
-          <div
-            className="v-dropzone"
-            data-dragging={dragging}
-            onDragOver={(e) => {
-              e.preventDefault();
-              setDragging(true);
-            }}
-            onDragLeave={() => setDragging(false)}
-            onDrop={onDrop}
-          >
-            <div className="v-dropzone-text">Drag &amp; drop a .env file here</div>
+          <div className="v-dropzone" data-dragging={dragging} {...dropHandlers}>
+            <div className="v-dropzone-text">
+              {dragging ? 'Release to read the file' : 'Drag & drop a .env file here'}
+            </div>
           </div>
           <div className="v-or">or paste below</div>
           <textarea

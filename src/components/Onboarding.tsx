@@ -1,6 +1,6 @@
-import { useState, type DragEvent } from 'react';
 import { useVaultStore } from '../store/useVaultStore';
 import { usePresence } from '../lib/usePresence';
+import { useFileDrop } from '../lib/useFileDrop';
 import styles from './Onboarding.module.css';
 
 export function Onboarding() {
@@ -16,21 +16,17 @@ export function Onboarding() {
   const obSkip = useVaultStore((s) => s.obSkip);
   const obImportAndNext = useVaultStore((s) => s.obImportAndNext);
   const obFinish = useVaultStore((s) => s.obFinish);
+  const showToast = useVaultStore((s) => s.showToast);
 
-  const [dragging, setDragging] = useState(false);
   const { mounted, state } = usePresence(onboarding, 140);
+  /// Step 1 is the only step with a dropzone to claim drops for.
+  const { dragging, dropHandlers } = useFileDrop(
+    onboarding && onboardingStep === 1,
+    setImportText,
+    showToast,
+  );
 
   if (!mounted) return null;
-
-  function onDrop(e: DragEvent<HTMLDivElement>) {
-    e.preventDefault();
-    setDragging(false);
-    const file = e.dataTransfer.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => setImportText(String(reader.result ?? ''));
-    reader.readAsText(file);
-  }
 
   const phase = state === 'entered' ? styles.isEntered : state === 'exiting' ? styles.isExiting : '';
 
@@ -85,17 +81,10 @@ export function Onboarding() {
                 onChange={(e) => setOnboardingEnvName(e.target.value)}
               />
             </div>
-            <div
-              className="v-dropzone"
-              data-dragging={dragging}
-              onDragOver={(e) => {
-                e.preventDefault();
-                setDragging(true);
-              }}
-              onDragLeave={() => setDragging(false)}
-              onDrop={onDrop}
-            >
-              <div className="v-dropzone-text">Drag &amp; drop a .env file here</div>
+            <div className="v-dropzone" data-dragging={dragging} {...dropHandlers}>
+              <div className="v-dropzone-text">
+                {dragging ? 'Release to read the file' : 'Drag & drop a .env file here'}
+              </div>
             </div>
             <div className="v-or">or paste below</div>
             <textarea

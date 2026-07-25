@@ -514,6 +514,31 @@ pub fn export_env_to_file(env_id: String, path: String, state: State<AppState>) 
     std::fs::write(&path, text).map_err(|e| e.to_string())
 }
 
+/// A `.env` is kilobytes at most. The cap keeps a mis-drop — a disk image,
+/// a core dump — from being pulled into memory and into the paste box.
+const MAX_DROPPED_FILE_BYTES: u64 = 1024 * 1024;
+
+/// Reads a file the user dropped onto a dropzone. The webview's drag-drop
+/// event hands the frontend an OS path rather than a `File` handle, so the
+/// read has to happen here.
+#[tauri::command]
+pub fn read_dropped_file(path: String) -> Result<String, String> {
+    let path = std::path::Path::new(&path);
+    let meta = std::fs::metadata(path).map_err(|e| format!("Can't read that file: {e}"))?;
+    if !meta.is_file() {
+        return Err("Drop a file, not a folder.".into());
+    }
+    if meta.len() > MAX_DROPPED_FILE_BYTES {
+        return Err(format!(
+            "That file is {} KB — .env files are expected to be under {} KB.",
+            meta.len() / 1024,
+            MAX_DROPPED_FILE_BYTES / 1024
+        ));
+    }
+    let bytes = std::fs::read(path).map_err(|e| format!("Can't read that file: {e}"))?;
+    vault_core::dotenv::decode_text(&bytes).map_err(stringify)
+}
+
 // ---------------------------------------------------------------------
 // History
 // ---------------------------------------------------------------------

@@ -1,4 +1,37 @@
-use crate::error::Result;
+use crate::error::{Result, VaultError};
+
+/// Decodes the raw bytes of a `.env` file into text.
+///
+/// Exists because Windows tooling does not reliably emit plain UTF-8: Notepad
+/// and VS Code's "UTF-8 with BOM" prepend a byte-order mark, and PowerShell
+/// 5.1's `>` redirect and `Out-File` default to UTF-16LE. Decoding these by
+/// their BOM — never by guessing at unmarked bytes — means a file dropped
+/// straight out of those tools imports instead of being rejected as "not text"
+/// or, worse, importing its first key with an invisible `\u{feff}` glued to
+/// the front of the name.
+pub fn decode_text(bytes: &[u8]) -> Result<String> {
+    fn utf16(bytes: &[u8], to_u16: fn([u8; 2]) -> u16) -> Result<String> {
+        let pairs = bytes.chunks_exact(2);
+        if !pairs.remainder().is_empty() {
+            return Err(VaultError::InvalidInput(
+                "file looks like UTF-16 but has a trailing odd byte".into(),
+            ));
+        }
+        let units: Vec<u16> = pairs.map(|c| to_u16([c[0], c[1]])).collect();
+        String::from_utf16(&units)
+            .map_err(|_| VaultError::InvalidInput("file is not valid UTF-16 text".into()))
+    }
+
+    if let Some(rest) = bytes.strip_prefix(&[0xFF, 0xFE]) {
+        return utf16(rest, u16::from_le_bytes);
+    }
+    if let Some(rest) = bytes.strip_prefix(&[0xFE, 0xFF]) {
+        return utf16(rest, u16::from_be_bytes);
+    }
+    let rest = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(bytes);
+    String::from_utf8(rest.to_vec())
+        .map_err(|_| VaultError::InvalidInput("file is not valid UTF-8 text".into()))
+}
 
 /// Parses `.env`-style text into ordered key/value pairs.
 ///
@@ -16,6 +49,11 @@ use crate::error::Result;
 ///   import intact rather than being truncated at its first line break
 /// - lines without `=` are skipped
 pub fn parse_env_text(text: &str) -> Vec<(String, String)> {
+    // A leading BOM survives `trim()` -- U+FEFF is not White_Space -- so
+    // without this the first key of a Windows-authored file imports as
+    // "\u{feff}KEY". Stripped here as well as in `decode_text` so text that
+    // reached us already decoded (a paste, a browser `FileReader`) is covered.
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
     let lines: Vec<&str> = normalized.split('\n').collect();
     let mut out = Vec::new();
@@ -294,6 +332,81 @@ mod tests {
                 ("B".to_string(), "2".to_string())
             ]
         );
+    }
+
+    // -----------------------------------------------------------------
+    // Encodings Windows tooling actually emits
+    // -----------------------------------------------------------------
+
+    fn utf16le(s: &str) -> Vec<u8> {
+        let mut out = vec![0xFF, 0xFE];
+        for unit in s.encode_utf16() {
+            out.extend_from_slice(&unit.to_le_bytes());
+        }
+        out
+    }
+
+    #[test]
+    fn decodes_plain_utf8() {
+        assert_eq!(decode_text(b"A=1\n").unwrap(), "A=1\n");
+    }
+
+    #[test]
+    fn decodes_utf8_with_a_bom_and_drops_the_mark() {
+        let mut bytes = vec![0xEF, 0xBB, 0xBF];
+        bytes.extend_from_slice(b"A=1\n");
+        assert_eq!(decode_text(&bytes).unwrap(), "A=1\n");
+    }
+
+    #[test]
+    fn decodes_utf16_in_both_byte_orders() {
+        assert_eq!(decode_text(&utf16le("A=1\n")).unwrap(), "A=1\n");
+
+        let mut be = vec![0xFE, 0xFF];
+        for unit in "A=1\n".encode_utf16() {
+            be.extend_from_slice(&unit.to_be_bytes());
+        }
+        assert_eq!(decode_text(&be).unwrap(), "A=1\n");
+    }
+
+    #[test]
+    fn rejects_bytes_that_are_not_text_in_any_supported_encoding() {
+        // a PNG header: no BOM, invalid UTF-8
+        assert!(decode_text(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0xFF]).is_err());
+        // UTF-16 BOM with a dangling odd byte
+        assert!(decode_text(&[0xFF, 0xFE, 0x41]).is_err());
+    }
+
+    #[test]
+    fn a_windows_authored_file_parses_with_clean_key_names() {
+        // Notepad's "UTF-8 with BOM" plus CRLF -- the combination that used to
+        // yield a first key of "\u{feff}A".
+        let mut bytes = vec![0xEF, 0xBB, 0xBF];
+        bytes.extend_from_slice(b"A=1\r\nB=2\r\n");
+        let parsed = parse_env_text(&decode_text(&bytes).unwrap());
+        assert_eq!(
+            parsed,
+            vec![
+                ("A".to_string(), "1".to_string()),
+                ("B".to_string(), "2".to_string())
+            ]
+        );
+
+        // and the same file as PowerShell would redirect it
+        let parsed = parse_env_text(&decode_text(&utf16le("A=1\r\nB=2\r\n")).unwrap());
+        assert_eq!(
+            parsed,
+            vec![
+                ("A".to_string(), "1".to_string()),
+                ("B".to_string(), "2".to_string())
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_strips_a_bom_that_arrived_already_decoded() {
+        let parsed = parse_env_text("\u{feff}A=1\n");
+        assert_eq!(parsed, vec![("A".to_string(), "1".to_string())]);
     }
 
     #[test]
