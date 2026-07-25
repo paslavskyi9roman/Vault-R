@@ -13,9 +13,16 @@ export function ImportModal() {
   const activeRepoId = useVaultStore((s) => s.activeRepoId);
   const activeEnvId = useVaultStore((s) => s.activeEnvId);
   const showToast = useVaultStore((s) => s.showToast);
+  const onboarding = useVaultStore((s) => s.onboarding);
 
   const { mounted, state } = usePresence(importOpen, 120);
-  const { zoneRef, dragging, dropHandlers } = useFileDrop(importOpen, setImportText, showToast);
+  /// Onboarding renders over this one and has its own dropzone; only one of
+  /// them may claim window-wide drops at a time.
+  const { dragging, dropHandlers } = useFileDrop(
+    importOpen && !onboarding,
+    setImportText,
+    showToast,
+  );
 
   if (!mounted) return null;
 
@@ -36,8 +43,10 @@ export function ImportModal() {
           <div className="v-modal-sub">
             Into {activeRepo && activeEnv ? `${activeRepo.name} / ${activeEnv.name}` : 'the active environment'}
           </div>
-          <div ref={zoneRef} className="v-dropzone" data-dragging={dragging} {...dropHandlers}>
-            <div className="v-dropzone-text">Drag &amp; drop a .env file here</div>
+          <div className="v-dropzone" data-dragging={dragging} {...dropHandlers}>
+            <div className="v-dropzone-text">
+              {dragging ? 'Release to read the file' : 'Drag & drop a .env file here'}
+            </div>
           </div>
           <div className="v-or">or paste below</div>
           <textarea

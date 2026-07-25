@@ -3,36 +3,41 @@ import { isTauri } from '@tauri-apps/api/core';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { api } from './api';
 
-/// Tauri reports drop coordinates in physical device pixels relative to the
-/// webview; `getBoundingClientRect` is in CSS pixels. Without the divide, the
-/// hit test misses the dropzone entirely on any HiDPI display.
-function isOverElement(el: HTMLElement | null, position: { x: number; y: number }): boolean {
-  if (!el) return false;
-  const rect = el.getBoundingClientRect();
-  if (rect.width === 0 || rect.height === 0) return false;
-  const scale = window.devicePixelRatio || 1;
-  const x = position.x / scale;
-  const y = position.y / scale;
-  return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+function baseName(path: string): string {
+  const parts = path.split(/[\\/]/);
+  return parts[parts.length - 1] || path;
 }
 
 /// Wires a dropzone to file drops.
 ///
-/// The webview never sees an HTML5 `drop`: Tauri claims OS drag-and-drop at the
-/// window level (`dragDropEnabled` defaults on) and re-emits it as its own
+/// The webview never sees an HTML5 `drop`: Tauri claims OS drag-and-drop at
+/// the window level (`dragDropEnabled` defaults on) and re-emits it as its own
 /// event carrying file *paths*, so the DOM handlers alone are dead code inside
-/// the app. This listens to the Tauri event, hit-tests the drop against the
-/// zone's rect, and reads the file through the backend. The returned DOM
-/// handlers are the fallback for running the frontend in a plain browser.
+/// the app. This listens to the Tauri event and reads the file through the
+/// backend. The returned DOM handlers are the fallback for running the
+/// frontend in a plain browser.
 ///
-/// `enabled` gates the subscription so a closed modal isn't hit-testing drops
-/// meant for whatever is on screen instead.
+/// Deliberately ignores the position the event reports, because that number
+/// cannot be trusted to hit-test a rect:
+///   - macOS gets it wrong by a constant roughly the height of the titlebar.
+///     wry subtracts the *webview's* height from a `draggingLocation()` given
+///     in *window* space, so the two coordinate systems differ by whatever
+///     chrome sits above the content view (tauri-apps/tauri#10744, open).
+///   - Every platform reports garbage while devtools are open, which is the
+///     state the app is in for most of its development.
+///   - Windows reports raw client-area pixels with no DPI scaling, so the
+///     conversion to CSS pixels drifts under per-monitor or fractional scaling.
+///
+/// Nothing is lost by ignoring it. Both dropzones live inside a modal that
+/// covers the whole window, so while one is open there is no other target a
+/// drop could have been meant for — anywhere in the window is unambiguous.
+/// `enabled` is what scopes the listener, and it is the caller's job to keep
+/// that true only while its zone is the active one.
 export function useFileDrop(
   enabled: boolean,
   onText: (text: string) => void,
   onError?: (message: string) => void,
 ) {
-  const zoneRef = useRef<HTMLDivElement | null>(null);
   const [dragging, setDragging] = useState(false);
 
   /// Kept in refs so a new callback identity each render doesn't tear down and
@@ -41,6 +46,20 @@ export function useFileDrop(
   const onErrorRef = useRef(onError);
   onTextRef.current = onText;
   onErrorRef.current = onError;
+
+  const readPaths = useCallback((paths: string[]) => {
+    const path = paths[0];
+    if (!path) return;
+    api
+      .readDroppedFile(path)
+      .then((text) => {
+        onTextRef.current(text);
+        if (paths.length > 1) {
+          onErrorRef.current?.(`Dropped ${paths.length} files — read ${baseName(path)}.`);
+        }
+      })
+      .catch((e) => onErrorRef.current?.(String(e)));
+  }, []);
 
   useEffect(() => {
     if (!enabled) {
@@ -54,23 +73,12 @@ export function useFileDrop(
 
     void getCurrentWebview()
       .onDragDropEvent(({ payload }) => {
-        if (payload.type === 'leave') {
+        if (payload.type === 'drop') {
           setDragging(false);
+          readPaths(payload.paths);
           return;
         }
-        const over = isOverElement(zoneRef.current, payload.position);
-        if (payload.type !== 'drop') {
-          setDragging(over);
-          return;
-        }
-        setDragging(false);
-        if (!over) return;
-        const path = payload.paths[0];
-        if (!path) return;
-        api
-          .readDroppedFile(path)
-          .then((text) => onTextRef.current(text))
-          .catch((e) => onErrorRef.current?.(String(e)));
+        setDragging(payload.type !== 'leave');
       })
       .then((fn) => {
         if (disposed) fn();
@@ -85,7 +93,7 @@ export function useFileDrop(
       unlisten?.();
       setDragging(false);
     };
-  }, [enabled]);
+  }, [enabled, readPaths]);
 
   const onDragOver = useCallback((e: DragEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -111,5 +119,5 @@ export function useFileDrop(
     reader.readAsText(file);
   }, []);
 
-  return { zoneRef, dragging, dropHandlers: { onDragOver, onDragLeave, onDrop } };
+  return { dragging, dropHandlers: { onDragOver, onDragLeave, onDrop } };
 }

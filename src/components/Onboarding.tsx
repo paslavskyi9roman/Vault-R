@@ -19,8 +19,8 @@ export function Onboarding() {
   const showToast = useVaultStore((s) => s.showToast);
 
   const { mounted, state } = usePresence(onboarding, 140);
-  /// Step 1 is the only step with a dropzone to hit-test against.
-  const { zoneRef, dragging, dropHandlers } = useFileDrop(
+  /// Step 1 is the only step with a dropzone to claim drops for.
+  const { dragging, dropHandlers } = useFileDrop(
     onboarding && onboardingStep === 1,
     setImportText,
     showToast,
@@ -81,8 +81,10 @@ export function Onboarding() {
                 onChange={(e) => setOnboardingEnvName(e.target.value)}
               />
             </div>
-            <div ref={zoneRef} className="v-dropzone" data-dragging={dragging} {...dropHandlers}>
-              <div className="v-dropzone-text">Drag &amp; drop a .env file here</div>
+            <div className="v-dropzone" data-dragging={dragging} {...dropHandlers}>
+              <div className="v-dropzone-text">
+                {dragging ? 'Release to read the file' : 'Drag & drop a .env file here'}
+              </div>
             </div>
             <div className="v-or">or paste below</div>
             <textarea

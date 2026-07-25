@@ -536,7 +536,7 @@ pub fn read_dropped_file(path: String) -> Result<String, String> {
         ));
     }
     let bytes = std::fs::read(path).map_err(|e| format!("Can't read that file: {e}"))?;
-    String::from_utf8(bytes).map_err(|_| "That file isn't UTF-8 text.".to_string())
+    vault_core::dotenv::decode_text(&bytes).map_err(stringify)
 }
 
 // ---------------------------------------------------------------------
