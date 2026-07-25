@@ -6,8 +6,8 @@ explains what that means in practice.
 
 ## Getting set up
 
-You need a [Rust toolchain](https://rustup.rs), Node 20+, and `git` on your
-`PATH`. Linux also needs the Tauri system dependencies (WebKitGTK and friends);
+You need a [Rust toolchain](https://rustup.rs), Node 22 (what CI builds on), and
+`git` on your `PATH`. Linux also needs the Tauri system dependencies (WebKitGTK and friends);
 see the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/).
 
 ```sh
@@ -21,9 +21,10 @@ npm run tauri dev
 cargo test --workspace          # vault-core + vault-cli
 cargo clippy --workspace --all-targets -- -D warnings
 npx tsc --noEmit
+npm run build                   # Rollup resolves things tsc alone does not
 ```
 
-CI runs exactly these. The git leak-guard tests build real git repositories in
+CI runs exactly these four. The git leak-guard tests build real git repositories in
 temp directories, so the full suite needs `git` available — they set their own
 identity per repository, so your global git config is not involved.
 

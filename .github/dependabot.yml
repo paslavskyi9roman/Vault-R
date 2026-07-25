@@ -1,0 +1,10 @@
+version: 2
+updates:
+  # The workflow pins third-party actions by commit SHA, which is only safe as
+  # long as something bumps them; that is this file's whole job.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: ci
